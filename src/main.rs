@@ -27,7 +27,7 @@ struct Args {
     manifest: PathBuf,
 
     /// Location to write dotfile of graph to
-    output_file: String,
+    output_file: PathBuf,
 
     /// Provide full call graph instead of propagation graph
     #[arg(long)]
@@ -40,24 +40,12 @@ fn main() {
     let early_dcx =
         rustc_session::EarlyDiagCtxt::new(rustc_session::config::ErrorOutputType::default());
 
-    // Get command-line args
-    // let args = rustc_driver::args::raw_args(&early_dcx)
-    //     .unwrap_or_else(|_| std::process::exit(rustc_driver::EXIT_FAILURE));
-
-    // Extract the arguments
-    // let (relative_manifest_path, relative_output_path, remove_redundant) = extract_arguments(&args);
-
     let args = Args::parse();
-    let (relative_manifest_path, relative_output_path, remove_redundant) = (
-        args.manifest.clone(),
-        args.output_file.clone(),
-        args.call_graph,
-    );
-    let manifest_path = get_manifest_path(&relative_manifest_path);
-    let output_path = get_output_path(&relative_output_path);
+    let manifest_path = get_manifest_path(&args.manifest);
+    let output_path = get_output_path(&args.output_file);
 
     // Extract the compiler arguments from running `cargo build`
-    let compiler_args = get_compiler_args(&relative_manifest_path, &manifest_path)
+    let compiler_args = get_compiler_args(&args.manifest, &manifest_path)
         .expect("Could not get arguments from cargo build!");
 
     // Enable CTRL + C
@@ -73,35 +61,13 @@ fn main() {
     // Run the compiler using the retrieved args.
     let _exit_code = run_compiler(
         compiler_args,
-        &mut AnalysisCallback(output_path, remove_redundant),
+        &mut AnalysisCallback(output_path, args.call_graph),
         using_internal_features,
     );
-
-    // println!("Ran compiler, exit code: {exit_code}");
-}
-
-/// Extract the needed arguments from the provided arguments
-fn extract_arguments(args: &[String]) -> (String, String, bool) {
-    if args.len() < 3 {
-        eprintln!("Usage:");
-        eprintln!("static-result-analyzer.exe input output [--call]");
-        eprintln!();
-        eprintln!("Both the input and output path should be relative.");
-        eprintln!(
-            "The call flag will output the call graph instead of the error chain graph if set."
-        );
-        std::process::exit(rustc_driver::EXIT_FAILURE);
-    }
-
-    (
-        args.get(1).unwrap().clone(),
-        args.get(2).unwrap().clone(),
-        !args.get(3).is_some_and(|arg| arg == "--call"),
-    )
 }
 
 /// Get the full path to the manifest.
-fn get_output_path(output_path: &str) -> PathBuf {
+fn get_output_path(output_path: &Path) -> PathBuf {
     std::env::current_dir().unwrap().join(output_path)
 }
 
