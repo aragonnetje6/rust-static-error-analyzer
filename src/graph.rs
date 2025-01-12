@@ -39,11 +39,11 @@ impl<'a> dot::Labeller<'a, CallNode, CallEdge> for CallGraph {
     fn graph_id(&self) -> Id<'a> {
         let mut name: String = self.crate_name.clone();
         name.retain(|e| e.is_ascii_alphanumeric() || e == '_');
-        Id::new(format!("error_propagation_{name}")).unwrap()
+        Id::new(format!("error_propagation_{name}")).expect("invalid graph ID")
     }
 
     fn node_id(&self, n: &CallNode) -> Id<'a> {
-        Id::new(format!("n{:?}", n.id)).unwrap()
+        Id::new(format!("n{:?}", n.id)).expect("invalid node ID")
     }
 
     fn node_label(&self, n: &CallNode) -> LabelText<'a> {
@@ -138,11 +138,11 @@ impl<'a> dot::Labeller<'a, ChainNode, ChainEdge> for ChainGraph {
     fn graph_id(&'a self) -> Id<'a> {
         let mut name: String = self.crate_name.clone();
         name.retain(|e| e.is_ascii_alphanumeric() || e == '_');
-        Id::new(format!("error_propagation_{name}_chains")).unwrap()
+        Id::new(format!("error_propagation_{name}_chains")).expect("invalid graph ID")
     }
 
     fn node_id(&'a self, n: &ChainNode) -> Id<'a> {
-        Id::new(format!("n{:?}", n.id)).unwrap()
+        Id::new(format!("n{:?}", n.id)).expect("invalid node ID")
     }
 
     fn node_label(&self, n: &ChainNode) -> LabelText<'a> {
@@ -245,10 +245,8 @@ impl CallGraph {
     /// Convert this graph to dot representation.
     pub fn to_dot(&self) -> String {
         let mut buf = Vec::new();
-
-        dot::render(self, &mut buf).unwrap();
-
-        String::from_utf8(buf).unwrap()
+        dot::render(self, &mut buf).expect("graph rendering failed");
+        String::from_utf8(buf).expect("invalid graph representation")
     }
 }
 
@@ -352,10 +350,8 @@ impl ChainGraph {
     /// Convert this graph to dot representation.
     pub fn to_dot(&self) -> String {
         let mut buf = Vec::new();
-
-        dot::render(self, &mut buf).unwrap();
-
-        String::from_utf8(buf).unwrap()
+        dot::render(self, &mut buf).expect("graph rendering error");
+        String::from_utf8(buf).expect("graph string invalid")
     }
 }
 

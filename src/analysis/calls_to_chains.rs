@@ -1,5 +1,5 @@
 use crate::graph::{CallEdge, CallGraph, ChainGraph};
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 pub fn to_chains(graph: &CallGraph) -> ChainGraph {
     let mut new_graph = ChainGraph::new(graph.crate_name.clone());
@@ -29,23 +29,19 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
 
             for call in calls {
                 // If we've already added the node to the new graph, refer to that, otherwise, add a new node
-                let from = if let std::collections::hash_map::Entry::Vacant(e) = node_map.entry(call.from) {
-                    let id = new_graph.add_node(graph.nodes[call.from].label.clone());
-                    e.insert(id);
-                    id
-                } else {
-                    *node_map.get(&call.from).unwrap()
+                let from = match node_map.entry(call.from) {
+                    Entry::Occupied(e) => *e.get(),
+                    Entry::Vacant(e) => {
+                        *e.insert(new_graph.add_node(graph.nodes[call.from].label.clone()))
+                    }
                 };
-
                 // Ditto
-                let to = if let std::collections::hash_map::Entry::Vacant(e) = node_map.entry(call.to) {
-                    let id = new_graph.add_node(graph.nodes[call.to].label.clone());
-                    e.insert(id);
-                    id
-                } else {
-                    *node_map.get(&call.to).unwrap()
+                let to = match node_map.entry(call.to) {
+                    Entry::Occupied(e) => *e.get(),
+                    Entry::Vacant(e) => {
+                        *e.insert(new_graph.add_node(graph.nodes[call.to].label.clone()))
+                    }
                 };
-
                 // Add the edge
                 new_graph.add_edge(from, to, call.ty);
             }
@@ -63,7 +59,12 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
     new_graph
 }
 
-fn get_chain_from_edge(graph: &CallGraph, from: &CallEdge, explored: &mut Vec<usize>, depth: usize) -> (Vec<CallEdge>, usize) {
+fn get_chain_from_edge(
+    graph: &CallGraph,
+    from: &CallEdge,
+    explored: &mut Vec<usize>,
+    depth: usize,
+) -> (Vec<CallEdge>, usize) {
     let mut res = vec![];
     let mut max_depth = depth;
 

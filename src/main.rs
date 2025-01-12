@@ -1,5 +1,5 @@
 #![feature(rustc_private)]
-#![warn(clippy::pedantic)]
+#![warn(clippy::pedantic, clippy::unwrap_used)]
 #![allow(clippy::cast_precision_loss)]
 
 mod analysis;
@@ -41,8 +41,8 @@ fn main() {
         rustc_session::EarlyDiagCtxt::new(rustc_session::config::ErrorOutputType::default());
 
     let args = Args::parse();
-    let manifest_path = get_manifest_path(&args.manifest);
-    let output_path = get_output_path(&args.output_file);
+    let manifest_path = absolute_path(&args.manifest);
+    let output_path = absolute_path(&args.output_file);
 
     // Extract the compiler arguments from running `cargo build`
     let compiler_args = get_compiler_args(&args.manifest, &manifest_path)
@@ -61,19 +61,19 @@ fn main() {
     // Run the compiler using the retrieved args.
     let _exit_code = run_compiler(
         compiler_args,
-        &mut AnalysisCallback(output_path, args.call_graph),
+        &mut AnalysisCallback {
+            output_path,
+            call_graph: args.call_graph,
+        },
         using_internal_features,
     );
 }
 
-/// Get the full path to the manifest.
-fn get_output_path(output_path: &Path) -> PathBuf {
-    std::env::current_dir().unwrap().join(output_path)
-}
-
-/// Get the full path to the manifest.
-fn get_manifest_path(cargo_path: &Path) -> PathBuf {
-    std::env::current_dir().unwrap().join(cargo_path)
+/// Turn relative path into absolute path
+fn absolute_path(cargo_path: &Path) -> PathBuf {
+    std::env::current_dir()
+        .expect("current directory is invalid")
+        .join(cargo_path)
 }
 
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
@@ -183,18 +183,17 @@ fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
 fn cargo_clean(manifest_path: &Path, package_name: &str) -> String {
     println!("Cleaning package...");
-    let mut clean_command = create_cargo_command();
-    clean_command.arg("clean");
-    clean_command.arg("-p");
-    clean_command.arg(package_name);
-
-    clean_command.current_dir(
-        manifest_path
-            .parent()
-            .expect("Could not get manifest directory!"),
-    );
-
-    let output = clean_command.output().expect("Could not clean!");
+    let output = Command::new("cargo")
+        .arg("clean")
+        .arg("-p")
+        .arg(package_name)
+        .current_dir(
+            manifest_path
+                .parent()
+                .expect("Could not get manifest directory!"),
+        )
+        .output()
+        .expect("Could not clean!");
 
     let stderr = String::from_utf8(output.stderr).expect("Invalid UTF8!");
 
@@ -238,17 +237,10 @@ fn get_package_name(manifest_path: &Path) -> (String, Option<String>) {
     (package_name, None)
 }
 
-/// Create a new cargo command.
-fn create_cargo_command() -> Command {
-    Command::new("cargo")
-}
-
 /// Run `cargo --version`.
 fn cargo_version() -> String {
-    let mut version_command = create_cargo_command();
-    version_command.arg("--version");
-
-    let output = version_command
+    let output = Command::new("cargo")
+        .arg("--version")
         .output()
         .expect("Could not get cargo version!");
 
@@ -259,13 +251,13 @@ fn cargo_version() -> String {
 fn cargo_build_verbose(manifest_path: &Path) -> String {
     // TODO: interrupt build as to not compile the program twice
     println!("Building package...");
-    let mut build_command = create_cargo_command();
-    build_command.arg("build");
-    build_command.arg("-v");
-    build_command.arg("--manifest-path");
-    build_command.arg(manifest_path.as_os_str());
-
-    let output = build_command.output().expect("Could not build!");
+    let output = Command::new("cargo")
+        .arg("build")
+        .arg("-v")
+        .arg("--manifest-path")
+        .arg(manifest_path.as_os_str())
+        .output()
+        .expect("Could not build!");
 
     let stderr = String::from_utf8(output.stderr).expect("Invalid UTF8!");
 
@@ -328,7 +320,10 @@ fn run_compiler(
     })
 }
 
-struct AnalysisCallback(PathBuf, bool);
+struct AnalysisCallback {
+    output_path: PathBuf,
+    call_graph: bool,
+}
 
 impl rustc_driver::Callbacks for AnalysisCallback {
     fn after_crate_root_parsing<'tcx>(
@@ -337,32 +332,35 @@ impl rustc_driver::Callbacks for AnalysisCallback {
         queries: &'tcx Queries<'tcx>,
     ) -> Compilation {
         // Access type context
-        queries.global_ctxt().unwrap().enter(|context| {
-            println!("Analyzing output...");
-            // Analyze the program using the type context
-            let (call_graph, chain_graph) = analysis::analyze(context);
+        queries
+            .global_ctxt()
+            .expect("global context unavailable")
+            .enter(|context| {
+                println!("Analyzing output...");
+                // Analyze the program using the type context
+                let (call_graph, chain_graph) = analysis::analyze(context);
 
-            let dot = if self.1 {
-                chain_graph.to_dot()
-            } else {
-                call_graph.to_dot()
-            };
+                let dot = if self.call_graph {
+                    chain_graph.to_dot()
+                } else {
+                    call_graph.to_dot()
+                };
 
-            println!("Writing graph...");
+                println!("Writing graph...");
 
-            match std::fs::write(&self.0, dot.clone()) {
-                Ok(()) => {
-                    println!("Done!");
-                    println!("Wrote to {}", &self.0.display());
+                match std::fs::write(&self.output_path, dot.clone()) {
+                    Ok(()) => {
+                        println!("Done!");
+                        println!("Wrote to {}", &self.output_path.display());
+                    }
+                    Err(e) => {
+                        eprintln!("Could not write output!");
+                        eprintln!("{e}");
+                        eprintln!();
+                        println!("{dot}");
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Could not write output!");
-                    eprintln!("{e}");
-                    eprintln!();
-                    println!("{dot}");
-                }
-            }
-        });
+            });
 
         // No need to compile further
         Compilation::Stop
