@@ -12,12 +12,27 @@ extern crate rustc_middle;
 extern crate rustc_parse;
 extern crate rustc_session;
 
+use clap::Parser;
 use rustc_driver::Compilation;
 use rustc_interface::interface::Compiler;
 use rustc_interface::Queries;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use toml::Table;
+
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Location of manifest file of project to analyze
+    manifest: PathBuf,
+
+    /// Location to write dotfile of graph to
+    output_file: String,
+
+    /// Provide full call graph instead of propagation graph
+    #[arg(long)]
+    call_graph: bool,
+}
 
 /// Entry point, first sets up the compiler, and then runs it using the provided arguments.
 fn main() {
@@ -26,12 +41,18 @@ fn main() {
         rustc_session::EarlyDiagCtxt::new(rustc_session::config::ErrorOutputType::default());
 
     // Get command-line args
-    let args = rustc_driver::args::raw_args(&early_dcx)
-        .unwrap_or_else(|_| std::process::exit(rustc_driver::EXIT_FAILURE));
+    // let args = rustc_driver::args::raw_args(&early_dcx)
+    //     .unwrap_or_else(|_| std::process::exit(rustc_driver::EXIT_FAILURE));
 
     // Extract the arguments
-    let (relative_manifest_path, relative_output_path, remove_redundant) = extract_arguments(&args);
+    // let (relative_manifest_path, relative_output_path, remove_redundant) = extract_arguments(&args);
 
+    let args = Args::parse();
+    let (relative_manifest_path, relative_output_path, remove_redundant) = (
+        args.manifest.clone(),
+        args.output_file.clone(),
+        args.call_graph,
+    );
     let manifest_path = get_manifest_path(&relative_manifest_path);
     let output_path = get_output_path(&relative_output_path);
 
@@ -85,12 +106,12 @@ fn get_output_path(output_path: &str) -> PathBuf {
 }
 
 /// Get the full path to the manifest.
-fn get_manifest_path(cargo_path: &str) -> PathBuf {
+fn get_manifest_path(cargo_path: &Path) -> PathBuf {
     std::env::current_dir().unwrap().join(cargo_path)
 }
 
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
-fn get_compiler_args(relative_manifest_path: &str, manifest_path: &PathBuf) -> Option<Vec<String>> {
+fn get_compiler_args(relative_manifest_path: &Path, manifest_path: &Path) -> Option<Vec<String>> {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
 
     let (package_name, bin_name) = get_package_name(manifest_path);
@@ -101,7 +122,10 @@ fn get_compiler_args(relative_manifest_path: &str, manifest_path: &PathBuf) -> O
 
     let command = get_rustc_invocation(&build_output, &package_name, bin_name)?;
 
-    Some(split_args(relative_manifest_path, &command))
+    Some(split_args(
+        &relative_manifest_path.to_string_lossy(),
+        &command,
+    ))
 }
 
 /// Split up individual arguments from the command.
@@ -217,7 +241,7 @@ fn cargo_clean(manifest_path: &Path, package_name: &str) -> String {
 }
 
 /// Extract the package name from the given manifest.
-fn get_package_name(manifest_path: &PathBuf) -> (String, Option<String>) {
+fn get_package_name(manifest_path: &Path) -> (String, Option<String>) {
     let file = std::fs::read(manifest_path).expect("Could not read manifest!");
     let content = String::from_utf8(file).expect("Invalid UTF8!");
     let table = content
