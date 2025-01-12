@@ -5,6 +5,7 @@
 mod analysis;
 mod graph;
 
+extern crate rustc_ast;
 extern crate rustc_driver;
 extern crate rustc_hir;
 extern crate rustc_interface;
@@ -14,8 +15,6 @@ extern crate rustc_session;
 
 use clap::Parser;
 use rustc_driver::Compilation;
-use rustc_interface::interface::Compiler;
-use rustc_interface::Queries;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use toml::Table;
@@ -61,7 +60,7 @@ fn main() {
     // Run the compiler using the retrieved args.
     let _exit_code = run_compiler(
         compiler_args,
-        &mut AnalysisCallback {
+        &mut AnalysisCallbacks {
             output_path,
             call_graph: args.call_graph,
         },
@@ -94,10 +93,17 @@ fn get_compiler_args(relative_manifest_path: &Path, manifest_path: &Path) -> Opt
     ))
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum StringArg {
+    None,
+    SingleQuoted(String),
+    DoubleQouted(String),
+}
+
 /// Split up individual arguments from the command.
 fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
     let mut res = vec![];
-    let mut temp = String::new();
+    let mut temp = StringArg::None;
 
     // Split on ' '
     for arg in command.split(' ') {
@@ -109,58 +115,63 @@ fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
             new_arg.push_str(&arg);
             arg = new_arg;
         }
-
-        // Leave ' ' when enclosed in '"', removing the enclosing '"'
-        if arg.starts_with('"') && arg.ends_with('"') {
-            temp.push_str(
-                arg.strip_prefix('"')
-                    .expect("Could not remove '\"' from start of string!")
-                    .strip_suffix('"')
-                    .expect("Could not remove '\"' from end of string!"),
-            );
-            res.push(temp);
-            temp = String::new();
-        } else if arg.ends_with('"') {
-            temp.push_str(
-                arg.strip_suffix('"')
-                    .expect("Could not remove '\"' from end of string!"),
-            );
-            res.push(temp);
-            temp = String::new();
-        } else if arg.starts_with('"') {
-            temp.push_str(
-                arg.strip_prefix('"')
-                    .expect("Could not remove '\"' from start of string!"),
-            );
-            temp.push(' ');
-        } else if arg.starts_with('\'') && arg.ends_with('\'') {
-            temp.push_str(
-                arg.strip_prefix('\'')
-                    .expect("Could not remove '\"' from start of string!")
-                    .strip_suffix('\'')
-                    .expect("Could not remove '\"' from end of string!"),
-            );
-            res.push(temp);
-            temp = String::new();
-        } else if arg.ends_with('\'') {
-            temp.push_str(
-                arg.strip_suffix('\'')
-                    .expect("Could not remove '\"' from end of string!"),
-            );
-            res.push(temp);
-            temp = String::new();
-        } else if arg.starts_with('\'') {
-            temp.push_str(
-                arg.strip_prefix('\'')
-                    .expect("Could not remove '\"' from start of string!"),
-            );
-            temp.push(' ');
-        } else if !temp.is_empty() {
-            temp.push_str(&arg);
-            temp.push(' ');
-        } else {
-            res.push(arg);
-        }
+        temp = match temp {
+            StringArg::None => {
+                if arg.starts_with('"') && arg.ends_with('"') {
+                    res.push(
+                        arg.strip_prefix('"')
+                            .and_then(|x| x.strip_suffix('"'))
+                            .expect("unquoting failure")
+                            .to_owned(),
+                    );
+                    StringArg::None
+                } else if arg.starts_with('\'') && arg.ends_with('\'') {
+                    res.push(
+                        arg.strip_prefix('\'')
+                            .and_then(|x| x.strip_suffix('\''))
+                            .expect("unquoting failure")
+                            .to_owned(),
+                    );
+                    StringArg::None
+                } else if arg.starts_with('"') {
+                    StringArg::DoubleQouted(
+                        arg.strip_prefix('"').expect("unquoting failure").to_owned(),
+                    )
+                } else if arg.starts_with('\'') {
+                    StringArg::SingleQuoted(
+                        arg.strip_prefix('\'')
+                            .expect("unquoting failure")
+                            .to_owned(),
+                    )
+                } else {
+                    res.push(arg);
+                    StringArg::None
+                }
+            }
+            StringArg::SingleQuoted(mut temp) => {
+                temp.push_str(" ");
+                if arg.ends_with('\'') {
+                    temp.push_str(arg.strip_suffix('\'').expect("unquoting failure"));
+                    res.push(temp);
+                    StringArg::None
+                } else {
+                    temp.push_str(&arg);
+                    temp.push_str(" ");
+                    StringArg::SingleQuoted(temp)
+                }
+            }
+            StringArg::DoubleQouted(mut temp) => {
+                temp.push_str(" ");
+                if arg.ends_with('"') {
+                    temp.push_str(arg.strip_suffix('"').expect("unquoting failure"));
+                    res.push(temp);
+                    StringArg::None
+                } else {
+                    temp.push_str(&arg);
+                    StringArg::DoubleQouted(temp)
+                }
+            }
+        };
     }
 
     // Overwrite error format args
@@ -227,11 +238,8 @@ fn get_package_name(manifest_path: &Path) -> (String, Option<String>) {
             .expect("'bin' contains no values!")
             .as_table()
             .expect("'bin' is not a table!");
-        let binary_name = binary_table["name"]
-            .as_str()
-            .expect("No name found in binary information!")
-            .to_owned();
-        return (package_name, Some(binary_name));
+        let binary_name = binary_table["name"].as_str().map(str::to_owned);
+        return (package_name, binary_name);
     }
 
     (package_name, None)
@@ -289,9 +297,9 @@ fn get_rustc_invocation(
         for part in line.split('`') {
             for command in part.split("&& ") {
                 if command.contains("rustc")
-                    && command.contains("--crate-type bin")
-                    && !command.contains("build.rs")
-                    && command.contains("main.rs")
+                    // && command.contains("--crate-type bin")
+                    // && !command.contains("build.rs")
+                    // && command.contains("main.rs")
                     && command.contains(&format!("--crate-name {name}"))
                 {
                     return Some(String::from(command));
@@ -316,51 +324,47 @@ fn run_compiler(
     rustc_driver::catch_with_exit_code(move || {
         rustc_driver::RunCompiler::new(&args, callbacks)
             .set_using_internal_features(using_internal_features)
-            .run()
+            .run();
+        Ok(())
     })
 }
 
-struct AnalysisCallback {
+struct AnalysisCallbacks {
     output_path: PathBuf,
     call_graph: bool,
 }
 
-impl rustc_driver::Callbacks for AnalysisCallback {
-    fn after_crate_root_parsing<'tcx>(
+impl rustc_driver::Callbacks for AnalysisCallbacks {
+    fn after_analysis<'tcx>(
         &mut self,
-        _compiler: &Compiler,
-        queries: &'tcx Queries<'tcx>,
+        _compiler: &rustc_interface::interface::Compiler,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
     ) -> Compilation {
         // Access type context
-        queries
-            .global_ctxt()
-            .expect("global context unavailable")
-            .enter(|context| {
-                println!("Analyzing output...");
-                // Analyze the program using the type context
-                let (call_graph, chain_graph) = analysis::analyze(context);
+        println!("Analyzing output...");
+        // Analyze the program using the type context
+        let (call_graph, chain_graph) = analysis::analyze(tcx);
 
-                let dot = if self.call_graph {
-                    chain_graph.to_dot()
-                } else {
-                    call_graph.to_dot()
-                };
+        let dot = if self.call_graph {
+            chain_graph.to_dot()
+        } else {
+            call_graph.to_dot()
+        };
 
-                println!("Writing graph...");
+        println!("Writing graph...");
 
-                match std::fs::write(&self.output_path, dot.clone()) {
-                    Ok(()) => {
-                        println!("Done!");
-                        println!("Wrote to {}", &self.output_path.display());
-                    }
-                    Err(e) => {
-                        eprintln!("Could not write output!");
-                        eprintln!("{e}");
-                        eprintln!();
-                        println!("{dot}");
-                    }
-                }
-            });
+        match std::fs::write(&self.output_path, dot.clone()) {
+            Ok(()) => {
+                println!("Done!");
+                println!("Wrote to {}", &self.output_path.display());
+            }
+            Err(e) => {
+                eprintln!("Could not write output!");
+                eprintln!("{e}");
+                eprintln!();
+                println!("{dot}");
+            }
+        }
 
         // No need to compile further
         Compilation::Stop

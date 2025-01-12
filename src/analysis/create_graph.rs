@@ -2,8 +2,8 @@ use crate::graph::{CallEdge, CallGraph, CallNodeKind};
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::{DefId, LOCAL_CRATE};
 use rustc_hir::{
-    Block, Expr, ExprKind, HirId, ImplItemKind, Item, ItemKind, MatchSource, Pat, PatKind, QPath,
-    StmtKind, TyKind,
+    Block, Expr, ExprKind, HirId, ImplItemKind, Item, ItemKind, MatchSource, Pat, PatExpr, PatKind,
+    QPath, StmtKind, StructTailExpr, TyKind,
 };
 use rustc_middle::mir::TerminatorKind;
 use rustc_middle::ty::TyCtxt;
@@ -13,13 +13,13 @@ pub fn create_call_graph_from_root(context: TyCtxt, item: &Item) -> CallGraph {
     let mut graph = CallGraph::new(context.crate_name(LOCAL_CRATE).to_ident_string());
 
     // Access the function
-    if let ItemKind::Fn(_sig, _gen, id) = item.kind {
+    if let ItemKind::Fn { body, .. } = item.kind {
         // Create a node for the function
         let node = CallNodeKind::local_fn(item.hir_id().owner.to_def_id(), item.hir_id());
         let node_id = graph.add_node(&context.def_path_str(node.def_id()), node);
 
         // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
-        graph = add_calls_from_function(context, node_id, id.hir_id, graph);
+        graph = add_calls_from_function(context, node_id, body.hir_id, graph);
     }
 
     graph
@@ -47,8 +47,8 @@ fn add_calls_from_function(
             graph = add_calls_from_block(context, from_node, block, graph);
         }
         rustc_hir::Node::Item(item) => {
-            if let ItemKind::Fn(_sig, _gen, id) = item.kind {
-                graph = add_calls_from_function(context, from_node, id.hir_id, graph);
+            if let ItemKind::Fn { body, .. } = item.kind {
+                graph = add_calls_from_function(context, from_node, body.hir_id, graph);
             }
         }
         rustc_hir::Node::ImplItem(item) => {
@@ -327,7 +327,7 @@ fn get_function_calls_in_expression(
             for exp in args {
                 res.extend(get_function_calls_in_expression(context, exp.expr));
             }
-            if let Some(exp) = base {
+            if let StructTailExpr::Base(exp) = base {
                 res.extend(get_function_calls_in_expression(context, exp));
             }
         }
@@ -339,6 +339,9 @@ fn get_function_calls_in_expression(
         }
         ExprKind::Err(_err) => {
             // No function calls here
+        }
+        ExprKind::UnsafeBinderCast(_unsafe_binder_cast_kind, expr, ..) => {
+            res.extend(get_function_calls_in_expression(context, expr));
         }
     }
 
@@ -390,15 +393,15 @@ fn get_function_calls_in_pattern(
         PatKind::Ref(p, _mut) => {
             res.extend(get_function_calls_in_pattern(context, p));
         }
-        PatKind::Lit(exp) => {
-            res.extend(get_function_calls_in_expression(context, exp));
-        }
+        // PatKind::Lit(exp) => {
+        //     res.extend(get_function_calls_in_expression(context, exp));
+        // }
         PatKind::Range(a, b, _end) => {
             if let Some(exp) = a {
-                res.extend(get_function_calls_in_expression(context, exp));
+                res.extend(get_function_calls_in_pattern_expression(context, exp));
             }
             if let Some(exp) = b {
-                res.extend(get_function_calls_in_expression(context, exp));
+                res.extend(get_function_calls_in_pattern_expression(context, exp));
             }
         }
         PatKind::Slice(pats1, opt_pat, pats2) => {
@@ -415,9 +418,35 @@ fn get_function_calls_in_pattern(
         PatKind::Err(_err) => {
             // No function calls here
         }
+        PatKind::Expr(pat_expr) => {
+            res.extend(get_function_calls_in_pattern_expression(context, pat_expr))
+        }
+        PatKind::Guard(pat, expr) => {
+            res.extend(get_function_calls_in_pattern(context, pat));
+            res.extend(get_function_calls_in_expression(context, expr));
+        }
     }
 
     res
+}
+
+fn get_function_calls_in_pattern_expression(
+    context: TyCtxt<'_>,
+    exp: &PatExpr<'_>,
+) -> Vec<(CallNodeKind, HirId, bool, bool)> {
+    match exp.kind {
+        rustc_hir::PatExprKind::Lit { .. } => None, // no function calls here
+        rustc_hir::PatExprKind::ConstBlock(const_block) => {
+            let node = context.hir_node(const_block.hir_id);
+            Some(get_function_calls_in_block(
+                context,
+                node.expect_block(),
+                false,
+            ))
+        }
+        rustc_hir::PatExprKind::Path(..) => None, // no function calls
+    }
+    .unwrap_or_default()
 }
 
 /// Get the node kind from a given `QPath`.
