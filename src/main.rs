@@ -1,5 +1,6 @@
 #![feature(rustc_private)]
 #![warn(clippy::pedantic)]
+#![allow(clippy::cast_precision_loss)]
 
 mod analysis;
 mod graph;
@@ -49,13 +50,13 @@ fn main() {
     rustc_driver::init_rustc_env_logger(&early_dcx);
 
     // Run the compiler using the retrieved args.
-    let exit_code = run_compiler(
+    let _exit_code = run_compiler(
         compiler_args,
         &mut AnalysisCallback(output_path, remove_redundant),
         using_internal_features,
     );
 
-    println!("Ran compiler, exit code: {exit_code}");
+    // println!("Ran compiler, exit code: {exit_code}");
 }
 
 /// Extract the needed arguments from the provided arguments
@@ -142,6 +143,28 @@ fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
                     .expect("Could not remove '\"' from start of string!"),
             );
             temp.push(' ');
+        } else if arg.starts_with('\'') && arg.ends_with('\'') {
+            temp.push_str(
+                arg.strip_prefix('\'')
+                    .expect("Could not remove '\"' from start of string!")
+                    .strip_suffix('\'')
+                    .expect("Could not remove '\"' from end of string!"),
+            );
+            res.push(temp);
+            temp = String::new();
+        } else if arg.ends_with('\'') {
+            temp.push_str(
+                arg.strip_suffix('\'')
+                    .expect("Could not remove '\"' from end of string!"),
+            );
+            res.push(temp);
+            temp = String::new();
+        } else if arg.starts_with('\'') {
+            temp.push_str(
+                arg.strip_prefix('\'')
+                    .expect("Could not remove '\"' from start of string!"),
+            );
+            temp.push(' ');
         } else if !temp.is_empty() {
             temp.push_str(&arg);
             temp.push(' ');
@@ -168,7 +191,7 @@ fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
 }
 
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
-fn cargo_clean(manifest_path: &PathBuf, package_name: &str) -> String {
+fn cargo_clean(manifest_path: &Path, package_name: &str) -> String {
     println!("Cleaning package...");
     let mut clean_command = create_cargo_command();
     clean_command.arg("clean");
@@ -210,7 +233,8 @@ fn get_package_name(manifest_path: &PathBuf) -> (String, Option<String>) {
     if table.contains_key("bin") {
         let binary_table = table["bin"]
             .as_array()
-            .expect("'bin' is not an array!").first()
+            .expect("'bin' is not an array!")
+            .first()
             .expect("'bin' contains no values!")
             .as_table()
             .expect("'bin' is not a table!");
@@ -226,8 +250,6 @@ fn get_package_name(manifest_path: &PathBuf) -> (String, Option<String>) {
 
 /// Create a new cargo command.
 fn create_cargo_command() -> Command {
-    
-
     Command::new("cargo")
 }
 
@@ -239,8 +261,6 @@ fn cargo_version() -> String {
     let output = version_command
         .output()
         .expect("Could not get cargo version!");
-
-    
 
     String::from_utf8(output.stdout).expect("Invalid UTF8!")
 }
