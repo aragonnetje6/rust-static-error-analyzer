@@ -1,4 +1,5 @@
 #![feature(rustc_private)]
+#![warn(clippy::pedantic)]
 
 mod analysis;
 mod graph;
@@ -186,7 +187,7 @@ fn cargo_clean(manifest_path: &PathBuf, package_name: &str) -> String {
 
     if output.status.code() != Some(0) {
         eprintln!("Could not clean package!");
-        println!("{:?}", stderr);
+        println!("{stderr:?}");
     }
 
     stderr
@@ -209,8 +210,7 @@ fn get_package_name(manifest_path: &PathBuf) -> (String, Option<String>) {
     if table.contains_key("bin") {
         let binary_table = table["bin"]
             .as_array()
-            .expect("'bin' is not an array!")
-            .get(0)
+            .expect("'bin' is not an array!").first()
             .expect("'bin' contains no values!")
             .as_table()
             .expect("'bin' is not a table!");
@@ -226,9 +226,9 @@ fn get_package_name(manifest_path: &PathBuf) -> (String, Option<String>) {
 
 /// Create a new cargo command.
 fn create_cargo_command() -> Command {
-    let command = Command::new("cargo");
+    
 
-    command
+    Command::new("cargo")
 }
 
 /// Run `cargo --version`.
@@ -240,9 +240,9 @@ fn cargo_version() -> String {
         .output()
         .expect("Could not get cargo version!");
 
-    let stdout = String::from_utf8(output.stdout).expect("Invalid UTF8!");
+    
 
-    stdout
+    String::from_utf8(output.stdout).expect("Invalid UTF8!")
 }
 
 /// Run `cargo build -v` on the given manifest.
@@ -264,7 +264,7 @@ fn cargo_build_verbose(manifest_path: &Path) -> String {
         eprintln!();
         for line in stderr.split('\n') {
             if line.starts_with("error") {
-                eprintln!("{}", line);
+                eprintln!("{line}");
             }
         }
         eprintln!();

@@ -129,14 +129,12 @@ fn get_function_calls_in_block(
             if let ExprKind::Block(b, _lbl) = ex.kind {
                 return get_function_calls_in_block(context, b, is_fn);
             }
-        } else {
-            if is_fn {
-                for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
-                    res.push((kind, id, add_edge, true));
-                }
-            } else {
-                res.extend(get_function_calls_in_expression(context, exp));
+        } else if is_fn {
+            for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
+                res.push((kind, id, add_edge, true));
             }
+        } else {
+            res.extend(get_function_calls_in_expression(context, exp));
         }
     }
 

@@ -29,21 +29,21 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
 
             for call in calls {
                 // If we've already added the node to the new graph, refer to that, otherwise, add a new node
-                let from = if node_map.contains_key(&call.from) {
-                    node_map.get(&call.from).unwrap().clone()
-                } else {
+                let from = if let std::collections::hash_map::Entry::Vacant(e) = node_map.entry(call.from) {
                     let id = new_graph.add_node(graph.nodes[call.from].label.clone());
-                    node_map.insert(call.from, id);
+                    e.insert(id);
                     id
+                } else {
+                    *node_map.get(&call.from).unwrap()
                 };
 
                 // Ditto
-                let to = if node_map.contains_key(&call.to) {
-                    node_map.get(&call.to).unwrap().clone()
-                } else {
+                let to = if let std::collections::hash_map::Entry::Vacant(e) = node_map.entry(call.to) {
                     let id = new_graph.add_node(graph.nodes[call.to].label.clone());
-                    node_map.insert(call.to, id);
+                    e.insert(id);
                     id
+                } else {
+                    *node_map.get(&call.to).unwrap()
                 };
 
                 // Add the edge
