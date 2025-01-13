@@ -2,8 +2,9 @@ use crate::graph::{CallEdge, CallGraph, CallNodeKind};
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::DefId;
 use rustc_hir::{
-    Block, Expr, ExprKind, HirId, ImplItem, ImplItemKind, Item, ItemKind, MatchSource, Node, Pat,
-    PatExpr, PatKind, QPath, StmtKind, StructTailExpr, TraitFn, TraitItem, TraitItemKind, TyKind,
+    Block, Expr, ExprKind, HirId, ImplItem, ImplItemKind, Item, ItemKind, LetStmt, MatchSource,
+    Node, Pat, PatExpr, PatExprKind, PatKind, QPath, StmtKind, StructTailExpr, TraitFn, TraitItem,
+    TraitItemKind, TyKind,
 };
 use rustc_middle::mir::TerminatorKind;
 use rustc_middle::ty::TyCtxt;
@@ -197,7 +198,8 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                     // We have not yet explored this local function, so add new node and edge,
                     // and explore it.
                     // TODO: actually search for panics
-                    let id = graph.add_node(context.def_path_str(def_id), node_kind, false);
+                    let panics = false;
+                    let id = graph.add_node(context.def_path_str(def_id), node_kind, panics);
 
                     if add_edge {
                         graph.add_edge(CallEdge::new(from, id, call_id, propagates));
@@ -255,16 +257,15 @@ fn get_function_calls_in_block(
     for statement in block.stmts {
         // Match the kind of statement
         match statement.kind {
-            StmtKind::Let(stmt) => {
-                if let Some(exp) = stmt.init {
-                    res.extend(get_function_calls_in_expression(context, exp));
-                }
-            }
-            StmtKind::Item(_id) => {
-                // No function calls here
-            }
-            StmtKind::Expr(exp) | StmtKind::Semi(exp) => {
+            StmtKind::Expr(exp)
+            | StmtKind::Semi(exp)
+            | StmtKind::Let(&LetStmt {
+                init: Some(exp), ..
+            }) => {
                 res.extend(get_function_calls_in_expression(context, exp));
+            }
+            StmtKind::Let(&LetStmt { init: None, .. }) | StmtKind::Item(..) => {
+                // No function calls here
             }
         }
     }
@@ -510,24 +511,21 @@ fn get_function_calls_in_pattern_expression(
     context: TyCtxt<'_>,
     exp: &PatExpr<'_>,
 ) -> Vec<(CallNodeKind, HirId, bool, bool)> {
-    match exp.kind {
-        rustc_hir::PatExprKind::ConstBlock(const_block) => {
-            let node = context.hir_node(const_block.hir_id);
-            Some(get_function_calls_in_block(
-                context,
-                node.expect_block(),
-                false,
-            ))
-        }
-        rustc_hir::PatExprKind::Lit { .. } | rustc_hir::PatExprKind::Path(..) => None, // no function calls
+    if let PatExprKind::ConstBlock(const_block) = exp.kind {
+        get_function_calls_in_block(
+            context,
+            context.hir_node(const_block.hir_id).expect_block(),
+            false,
+        )
+    } else {
+        vec![]
     }
-    .unwrap_or_default()
 }
 
 /// Get the node kind from a given `QPath`.
 fn get_node_kind_from_path(context: TyCtxt, qpath: QPath) -> Option<(CallNodeKind, bool)> {
     match qpath {
-        QPath::Resolved(_ty, path) => {
+        QPath::Resolved(_, path) => {
             if let Res::Def(kind, id) = path.res {
                 let add_edge: bool = matches!(
                     kind,
@@ -536,12 +534,12 @@ fn get_node_kind_from_path(context: TyCtxt, qpath: QPath) -> Option<(CallNodeKin
                 return Some((get_node_kind_from_def_id(context, id), add_edge));
             }
         }
-        QPath::TypeRelative(ty, _segment) => {
+        QPath::TypeRelative(ty, _) => {
             if let TyKind::Path(path) = ty.kind {
                 return get_node_kind_from_path(context, path);
             }
         }
-        QPath::LangItem(_, _) => {}
+        QPath::LangItem(..) => {}
     }
 
     None
