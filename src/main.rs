@@ -13,10 +13,13 @@ extern crate rustc_middle;
 extern crate rustc_parse;
 extern crate rustc_session;
 
+use analysis::calls_to_chains;
 use clap::Parser;
+use graph::CallGraph;
 use rustc_driver::Compilation;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use toml::Table;
 
 #[derive(Parser)]
@@ -43,8 +46,10 @@ fn main() {
     let manifest_path = absolute_path(&args.manifest);
     let output_path = absolute_path(&args.output_file);
 
+    let manifest_info = get_manifest_info(&manifest_path);
+
     // Extract the compiler arguments from running `cargo build`
-    let compiler_commands = get_compiler_args(&args.manifest, &manifest_path);
+    let compiler_commands = get_compiler_args(&args.manifest, &manifest_path, &manifest_info);
 
     // Enable CTRL + C
     rustc_driver::install_ctrlc_handler();
@@ -55,25 +60,32 @@ fn main() {
 
     // This allows tools to enable rust logging without having to magically match rustc’s tracing crate version.
     rustc_driver::init_rustc_env_logger(&early_dcx);
-
+    let mut callbacks = AnalysisCallbacks {
+        output_path: output_path.clone(),
+        print_call_graph: args.call_graph,
+        graph: Arc::new(Mutex::new(CallGraph::new(manifest_info.package_name))),
+        last: !compiler_commands.bin_commands.is_empty(),
+    };
     // Run the compiler using the retrieved args.
     if let Some(compiler_command) = compiler_commands.lib_command {
         run_compiler(
             compiler_command,
-            &mut AnalysisCallbacks {
-                output_path: output_path.clone(),
-                call_graph: args.call_graph,
-            },
+            &mut callbacks,
             using_internal_features.clone(),
         );
     }
-    for compiler_command in compiler_commands.bin_commands {
+    if let Some((last, rest)) = compiler_commands.bin_commands.split_last() {
+        for compiler_command in rest {
+            run_compiler(
+                compiler_command.clone(),
+                &mut callbacks,
+                using_internal_features.clone(),
+            );
+        }
+        callbacks.last = true;
         run_compiler(
-            compiler_command,
-            &mut AnalysisCallbacks {
-                output_path: output_path.clone(),
-                call_graph: args.call_graph,
-            },
+            last.clone(),
+            &mut callbacks,
             using_internal_features.clone(),
         );
     }
@@ -93,10 +105,12 @@ struct CompilerCommands {
 }
 
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
-fn get_compiler_args(relative_manifest_path: &Path, manifest_path: &Path) -> CompilerCommands {
+fn get_compiler_args(
+    relative_manifest_path: &Path,
+    manifest_path: &Path,
+    manifest_info: &ManifestInfo,
+) -> CompilerCommands {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
-
-    let manifest_info = get_manifest_info(manifest_path);
 
     cargo_clean(manifest_path, &manifest_info.package_name);
 
@@ -451,7 +465,9 @@ fn run_compiler(
 
 struct AnalysisCallbacks {
     output_path: PathBuf,
-    call_graph: bool,
+    print_call_graph: bool,
+    graph: Arc<Mutex<CallGraph>>,
+    last: bool,
 }
 
 impl rustc_driver::Callbacks for AnalysisCallbacks {
@@ -463,26 +479,31 @@ impl rustc_driver::Callbacks for AnalysisCallbacks {
         // Access type context
         println!("Analyzing output...");
         // Analyze the program using the type context
-        let (call_graph, chain_graph) = analysis::analyze(tcx);
+        let mut call_graph = self.graph.lock().expect("locking failed");
+        analysis::analyze(tcx, &mut call_graph);
 
-        let dot = if self.call_graph {
-            chain_graph.to_dot()
-        } else {
-            call_graph.to_dot()
-        };
+        if self.last {
+            // Parse graph to show chains
+            let chain_graph = calls_to_chains::to_chains(&call_graph);
+            let dot = if self.print_call_graph {
+                chain_graph.to_dot()
+            } else {
+                call_graph.to_dot()
+            };
 
-        println!("Writing graph...");
+            println!("Writing graph...");
 
-        match std::fs::write(&self.output_path, dot.clone()) {
-            Ok(()) => {
-                println!("Done!");
-                println!("Wrote to {}", &self.output_path.display());
-            }
-            Err(e) => {
-                eprintln!("Could not write output!");
-                eprintln!("{e}");
-                eprintln!();
-                println!("{dot}");
+            match std::fs::write(&self.output_path, dot.clone()) {
+                Ok(()) => {
+                    println!("Done!");
+                    println!("Wrote to {}", &self.output_path.display());
+                }
+                Err(e) => {
+                    eprintln!("Could not write output!");
+                    eprintln!("{e}");
+                    eprintln!();
+                    println!("{dot}");
+                }
             }
         }
 

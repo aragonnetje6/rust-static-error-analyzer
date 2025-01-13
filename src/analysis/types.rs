@@ -44,12 +44,14 @@ fn get_call_type_using_mir(context: TyCtxt, call_id: HirId, caller_id: DefId) ->
             if let TerminatorKind::Call { func, fn_span, .. } = &terminator.kind {
                 if call_expr.span.hi() == fn_span.hi() {
                     if let Some((def_id, args)) = func.const_fn_def() {
-                        return Some(dbg!(context
-                            .type_of(def_id)
-                            .instantiate(context, args)
-                            .fn_sig(context)
-                            .output()
-                            .skip_binder()));
+                        return Some(
+                            context
+                                .type_of(def_id)
+                                .instantiate(context, args)
+                                .fn_sig(context)
+                                .output()
+                                .skip_binder(),
+                        );
                     }
                 }
             }

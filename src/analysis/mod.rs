@@ -1,8 +1,8 @@
-mod calls_to_chains;
+pub mod calls_to_chains;
 mod create_graph;
 mod types;
 
-use crate::graph::{CallGraph, ChainGraph};
+use crate::graph::CallGraph;
 use rustc_middle::ty::TyCtxt;
 
 /// Analysis steps:
@@ -20,49 +20,48 @@ use rustc_middle::ty::TyCtxt;
 /// NOTE: skipped due to lack of time
 ///
 /// Step 4: Parse the output graph to show individual propagation chains
-pub fn analyze(context: TyCtxt) -> (CallGraph, ChainGraph) {
+pub fn analyze(context: TyCtxt, call_graph: &mut CallGraph) {
     // Get the entry point(s) of the program
-    let entry_node = get_entry_node(context);
+    let nodes = get_entry_node(context);
 
-    todo!()
-    // // Create call graph
-    // let mut call_graph =
-    //     create_graph::create_call_graph_from_root(context, entry_node.expect_item());
+    for node in nodes {
+        create_graph::update_call_graph_with_node(context, call_graph, node);
+    }
 
-    // // Attach return type info
-    // for edge in &mut call_graph.edges {
-    //     let (ty, error) = types::get_error_or_type(
-    //         context,
-    //         edge.call_id,
-    //         call_graph.nodes[edge.from].kind.def_id(),
-    //         call_graph.nodes[edge.to].kind.def_id(),
-    //     );
-    //     edge.ty = Some(ty);
-    //     edge.is_error = error;
-    // }
-
-    // // Parse graph to show chains
-    // let chain_graph = calls_to_chains::to_chains(&call_graph);
-
-    // (call_graph, chain_graph)
+    // Attach return type info
+    for edge in &mut call_graph.edges {
+        if edge.ty.is_none() {
+            let (ty, error) = types::get_error_or_type(
+                context,
+                edge.call_id,
+                call_graph.nodes[edge.from].kind.def_id(),
+                call_graph.nodes[edge.to].kind.def_id(),
+            );
+            edge.ty = Some(ty);
+            edge.is_error = error;
+        }
+    }
 }
 
 /// Retrieve the entry node (aka main function) from the type context.
 fn get_entry_node(context: TyCtxt) -> Vec<rustc_hir::Node> {
-    if let Some((def_id, _entry_type)) = context.entry_fn(()) {
-        let id = context
-            .local_def_id_to_hir_id(def_id.as_local().expect("Entry function def id not local!"));
-        vec![context.hir_node(id)]
-    } else {
-        context
-            .hir()
-            .body_owners()
-            .map(|local_def_id| {
-                context
-                    .hir()
-                    .get_if_local(local_def_id.into())
-                    .expect("guaranteed locals")
-            })
-            .collect::<Vec<_>>()
-    }
+    context
+        .hir()
+        .body_owners()
+        .map(|local_def_id| {
+            context
+                .hir()
+                .get_if_local(local_def_id.into())
+                .expect("guaranteed locals")
+        })
+        .filter(|node| {
+            matches!(
+                node,
+                rustc_hir::Node::Item(_)
+                    | rustc_hir::Node::ForeignItem(_)
+                    | rustc_hir::Node::ImplItem(_)
+                    | rustc_hir::Node::TraitItem(_)
+            )
+        })
+        .collect::<Vec<_>>()
 }
