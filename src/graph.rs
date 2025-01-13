@@ -205,11 +205,11 @@ impl CallGraph {
     }
 
     /// Find a node of `LocalFn` kind.
-    pub fn find_local_fn_node(&self, id: HirId) -> Option<CallNode> {
+    pub fn find_local_fn_node(&self, id: HirId) -> Option<&CallNode> {
         for node in &self.nodes {
             if let CallNodeKind::LocalFn(_def_id, hir_id) = node.kind {
                 if hir_id == id {
-                    return Some(node.clone());
+                    return Some(node);
                 }
             }
         }
@@ -218,11 +218,11 @@ impl CallGraph {
     }
 
     /// Find a node of `NonLocalFn` kind.
-    pub fn find_non_local_fn_node(&self, id: DefId) -> Option<CallNode> {
+    pub fn find_non_local_fn_node(&self, id: DefId) -> Option<&CallNode> {
         for node in &self.nodes {
             if let CallNodeKind::NonLocalFn(def_id) = node.kind {
                 if def_id == id {
-                    return Some(node.clone());
+                    return Some(node);
                 }
             }
         }
