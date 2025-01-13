@@ -307,11 +307,13 @@ fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
                     let bin_name = bin_entry
                         .as_table()
                         .and_then(|bin| bin.get("name"))
-                        .and_then(|name| name.as_str()).map_or_else(|| package_name.clone(), str::to_owned);
+                        .and_then(|name| name.as_str())
+                        .map_or_else(|| package_name.clone(), str::to_owned);
                     let bin_path = bin_entry
                         .as_table()
                         .and_then(|bin| bin.get("path"))
-                        .and_then(|name| name.as_str()).map_or_else(|| String::from("src/main.rs"), str::to_owned);
+                        .and_then(|name| name.as_str())
+                        .map_or_else(|| String::from("src/main.rs"), str::to_owned);
                     root_path.join(&bin_path).exists().then_some(Crate {
                         name: bin_name,
                         path: bin_path,
@@ -324,12 +326,14 @@ fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
         .get("lib")
         .and_then(|lib| lib.as_table())
         .and_then(|lib| lib.get("name"))
-        .and_then(|name| name.as_str()).map_or_else(|| package_name.clone(), str::to_owned);
+        .and_then(|name| name.as_str())
+        .map_or_else(|| package_name.clone(), str::to_owned);
     let lib_path = table
         .get("lib")
         .and_then(|lib| lib.as_table())
         .and_then(|lib| lib.get("path"))
-        .and_then(|name| name.as_str()).map_or_else(|| String::from("src/lib.rs"), str::to_owned);
+        .and_then(|name| name.as_str())
+        .map_or_else(|| String::from("src/lib.rs"), str::to_owned);
     let lib = root_path.join(&lib_path).exists().then_some(Crate {
         name: lib_name,
         path: lib_path,
@@ -454,6 +458,7 @@ fn run_compiler(
     })
 }
 
+#[derive(Debug)]
 struct AnalysisCallbacks {
     output_path: PathBuf,
     print_call_graph: bool,
@@ -493,9 +498,9 @@ impl rustc_driver::Callbacks for AnalysisCallbacks {
             // Parse graph to show chains
             let chain_graph = calls_to_chains::to_chains(&call_graph);
             let dot = if self.print_call_graph {
-                chain_graph.to_dot()
-            } else {
                 call_graph.to_dot()
+            } else {
+                chain_graph.to_dot()
             };
 
             println!("Writing graph...");
