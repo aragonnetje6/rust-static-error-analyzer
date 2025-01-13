@@ -64,7 +64,7 @@ fn main() {
         output_path.clone(),
         args.call_graph,
         Arc::new(Mutex::new(CallGraph::new(manifest_info.package_name))),
-        !compiler_commands.bin_commands.is_empty(),
+        compiler_commands.bin_commands.is_empty(),
     );
     // Run the compiler using the retrieved args.
     if let Some(compiler_command) = compiler_commands.lib_command {
