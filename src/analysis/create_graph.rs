@@ -56,9 +56,11 @@ fn update_call_graph_with_trait_item(
 ) {
     match trait_item.kind {
         TraitItemKind::Fn(_, TraitFn::Provided(body_id)) => {
-            let node =
+            let node_kind =
                 CallNodeKind::local_fn(trait_item.hir_id().owner.to_def_id(), trait_item.hir_id());
-            let node_id = graph.add_node(&context.def_path_str(node.def_id()), node);
+            // TODO: actually search for panics
+            let node_id =
+                graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, false);
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
             add_calls_from_function(context, node_id, body_id.hir_id, graph);
@@ -74,9 +76,11 @@ fn update_call_graph_with_impl_item(
 ) {
     match impl_item.kind {
         ImplItemKind::Fn(_, body_id) => {
-            let node =
+            let node_kind =
                 CallNodeKind::local_fn(impl_item.hir_id().owner.to_def_id(), impl_item.hir_id());
-            let node_id = graph.add_node(&context.def_path_str(node.def_id()), node);
+            // TODO: actually search for panics
+            let node_id =
+                graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, false);
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
             add_calls_from_function(context, node_id, body_id.hir_id, graph);
@@ -89,7 +93,8 @@ fn update_call_graph_with_item(context: TyCtxt<'_>, graph: &mut CallGraph, item:
     match item.kind {
         ItemKind::Fn { body, .. } => {
             let node = CallNodeKind::local_fn(item.hir_id().owner.to_def_id(), item.hir_id());
-            let node_id = graph.add_node(&context.def_path_str(node.def_id()), node);
+            // TODO: actually search for panics
+            let node_id = graph.add_node(context.def_path_str(node.def_id()), node, false);
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
             add_calls_from_function(context, node_id, body.hir_id, graph);
@@ -191,7 +196,8 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                 } else {
                     // We have not yet explored this local function, so add new node and edge,
                     // and explore it.
-                    let id = graph.add_node(&context.def_path_str(def_id), node_kind);
+                    // TODO: actually search for panics
+                    let id = graph.add_node(context.def_path_str(def_id), node_kind, false);
 
                     if add_edge {
                         graph.add_edge(CallEdge::new(from, id, call_id, propagates));
@@ -208,7 +214,9 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                     }
                 } else {
                     // We have not yet explored this non-local function, so add new node and edge
-                    let id = graph.add_node(&context.def_path_str(node_kind.def_id()), node_kind);
+                    // TODO: actually search for panics
+                    let id =
+                        graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, false);
 
                     if add_edge {
                         graph.add_edge(CallEdge::new(from, id, call_id, propagates));
@@ -359,9 +367,6 @@ fn get_function_calls_in_expression(
         ExprKind::Unary(_op, exp) => {
             res.extend(get_function_calls_in_expression(context, exp));
         }
-        ExprKind::Lit(_lit) => {
-            // No function calls here
-        }
         ExprKind::Cast(exp, _ty) | ExprKind::Type(exp, _ty) => {
             res.extend(get_function_calls_in_expression(context, exp));
         }
@@ -422,12 +427,6 @@ fn get_function_calls_in_expression(
                 }
             }
         }
-        ExprKind::InlineAsm(_asm) => {
-            // No function calls here
-        }
-        ExprKind::OffsetOf(_ty, _ids) => {
-            // No function calls here
-        }
         ExprKind::Struct(_path, args, base) => {
             for exp in args {
                 res.extend(get_function_calls_in_expression(context, exp.expr));
@@ -442,11 +441,14 @@ fn get_function_calls_in_expression(
         ExprKind::Yield(exp, _src) => {
             res.extend(get_function_calls_in_expression(context, exp));
         }
-        ExprKind::Err(_err) => {
-            // No function calls here
-        }
         ExprKind::UnsafeBinderCast(_unsafe_binder_cast_kind, expr, ..) => {
             res.extend(get_function_calls_in_expression(context, expr));
+        }
+        ExprKind::Err(..)
+        | ExprKind::InlineAsm(..)
+        | ExprKind::OffsetOf(..)
+        | ExprKind::Lit(..) => {
+            // No function calls here
         }
     }
 
@@ -458,69 +460,50 @@ fn get_function_calls_in_pattern(
     context: TyCtxt,
     pat: &Pat,
 ) -> Vec<(CallNodeKind, HirId, bool, bool)> {
-    let mut res: Vec<(CallNodeKind, HirId, bool, bool)> = vec![];
-
     match pat.kind {
-        PatKind::Binding(_mode, _hir_id, _ident, opt_pat) => {
-            if let Some(p) = opt_pat {
-                res.extend(get_function_calls_in_pattern(context, p));
-            }
+        PatKind::Binding(_, _, _, opt_pat) => {
+            opt_pat.map(|pat| get_function_calls_in_pattern(context, pat))
         }
-        PatKind::Struct(_path, fields, _other) => {
-            for field in fields {
-                res.extend(get_function_calls_in_pattern(context, field.pat));
-            }
+        PatKind::Struct(_, fields, _) => Some(
+            fields
+                .iter()
+                .flat_map(|field| get_function_calls_in_pattern(context, field.pat))
+                .collect(),
+        ),
+        PatKind::TupleStruct(_, pats, _) | PatKind::Or(pats) | PatKind::Tuple(pats, _) => Some(
+            pats.iter()
+                .flat_map(|pat| get_function_calls_in_pattern(context, pat))
+                .collect(),
+        ),
+        PatKind::Box(pat) | PatKind::Deref(pat) | PatKind::Ref(pat, _) => {
+            Some(get_function_calls_in_pattern(context, pat))
         }
-        PatKind::TupleStruct(_path, pats, _pos) => {
-            for p in pats {
-                res.extend(get_function_calls_in_pattern(context, p));
-            }
-        }
-        PatKind::Or(pats) => {
-            for p in pats {
-                res.extend(get_function_calls_in_pattern(context, p));
-            }
-        }
-        PatKind::Tuple(pats, _pos) => {
-            for p in pats {
-                res.extend(get_function_calls_in_pattern(context, p));
-            }
-        }
-        PatKind::Box(p) | PatKind::Deref(p) => {
-            res.extend(get_function_calls_in_pattern(context, p));
-        }
-        PatKind::Ref(p, _mut) => {
-            res.extend(get_function_calls_in_pattern(context, p));
-        }
-        PatKind::Range(a, b, _end) => {
-            if let Some(exp) = a {
-                res.extend(get_function_calls_in_pattern_expression(context, exp));
-            }
-            if let Some(exp) = b {
-                res.extend(get_function_calls_in_pattern_expression(context, exp));
-            }
-        }
-        PatKind::Slice(pats1, opt_pat, pats2) => {
-            for p in pats1 {
-                res.extend(get_function_calls_in_pattern(context, p));
-            }
-            if let Some(p) = opt_pat {
-                res.extend(get_function_calls_in_pattern(context, p));
-            }
-            for p in pats2 {
-                res.extend(get_function_calls_in_pattern(context, p));
-            }
-        }
+        PatKind::Range(a, b, _) => Some(
+            a.into_iter()
+                .chain(b)
+                .flat_map(|pat_exp| get_function_calls_in_pattern_expression(context, pat_exp))
+                .collect(),
+        ),
+        PatKind::Slice(pats1, opt_pat, pats2) => Some(
+            pats1
+                .iter()
+                .chain(opt_pat)
+                .chain(pats2)
+                .flat_map(|pat| get_function_calls_in_pattern(context, pat))
+                .collect(),
+        ),
         PatKind::Expr(pat_expr) => {
-            res.extend(get_function_calls_in_pattern_expression(context, pat_expr));
+            Some(get_function_calls_in_pattern_expression(context, pat_expr))
         }
-        PatKind::Guard(pat, expr) => {
-            res.extend(get_function_calls_in_pattern(context, pat));
-            res.extend(get_function_calls_in_expression(context, expr));
-        }
-        PatKind::Wild | PatKind::Never | PatKind::Path(..) | PatKind::Err(..) => {}
+        PatKind::Guard(pat, expr) => Some(
+            get_function_calls_in_pattern(context, pat)
+                .into_iter()
+                .chain(get_function_calls_in_expression(context, expr))
+                .collect(),
+        ),
+        PatKind::Wild | PatKind::Never | PatKind::Path(..) | PatKind::Err(..) => None,
     }
-    res
+    .unwrap_or_default()
 }
 
 fn get_function_calls_in_pattern_expression(

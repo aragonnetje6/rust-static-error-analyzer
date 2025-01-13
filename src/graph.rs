@@ -192,8 +192,8 @@ impl CallGraph {
     }
 
     /// Add a node to this graph, returning its id.
-    pub fn add_node(&mut self, label: &str, node_kind: CallNodeKind) -> usize {
-        let node = CallNode::new(self.nodes.len(), label, node_kind);
+    pub fn add_node(&mut self, label: String, node_kind: CallNodeKind, panics: bool) -> usize {
+        let node = CallNode::new(self.nodes.len(), label, node_kind, panics);
         let id = node.id();
         self.nodes.push(node);
         id
@@ -252,12 +252,12 @@ impl CallGraph {
 
 impl CallNode {
     /// Create a new node.
-    fn new(node_id: usize, label: &str, node_type: CallNodeKind) -> Self {
+    fn new(id: usize, label: String, kind: CallNodeKind, panics: bool) -> Self {
         CallNode {
-            id: node_id,
-            label: String::from(label),
-            kind: node_type,
-            panics: false,
+            id,
+            label,
+            kind,
+            panics,
         }
     }
 
