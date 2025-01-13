@@ -1,13 +1,11 @@
 use dot::{Edges, Id, Kind, LabelText, Nodes, Style};
-use rustc_hir::def_id::DefId;
-use rustc_hir::HirId;
-use std::borrow::Cow;
-use std::cmp::PartialEq;
+use rustc_hir::{def_id::DefId, HirId};
+use std::{borrow::Cow, cmp::PartialEq, collections::BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct CallGraph {
     pub nodes: Vec<CallNode>,
-    pub edges: Vec<CallEdge>,
+    pub edges: BTreeSet<CallEdge>,
     pub crate_name: String,
 }
 
@@ -34,6 +32,20 @@ pub struct CallEdge {
     pub propagates: bool,
     pub is_error: bool,
 }
+
+impl PartialOrd for CallEdge {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CallEdge {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.from.cmp(&other.from).then(self.to.cmp(&other.to))
+    }
+}
+
+impl Eq for CallEdge {}
 
 impl<'a> dot::Labeller<'a, CallNode, CallEdge> for CallGraph {
     fn graph_id(&self) -> Id<'a> {
@@ -102,7 +114,7 @@ impl<'a> dot::GraphWalk<'a, CallNode, CallEdge> for CallGraph {
     }
 
     fn edges(&'a self) -> Edges<'a, CallEdge> {
-        Cow::Owned(self.edges.clone())
+        Cow::Owned(self.edges.iter().cloned().collect())
     }
 
     fn source(&'a self, edge: &CallEdge) -> CallNode {
@@ -186,7 +198,7 @@ impl CallGraph {
     pub fn new(crate_name: String) -> Self {
         CallGraph {
             nodes: Vec::new(),
-            edges: Vec::new(),
+            edges: BTreeSet::new(),
             crate_name,
         }
     }
@@ -194,14 +206,22 @@ impl CallGraph {
     /// Add a node to this graph, returning its id.
     pub fn add_node(&mut self, label: String, node_kind: CallNodeKind, panics: bool) -> usize {
         let node = CallNode::new(self.nodes.len(), label, node_kind, panics);
-        let id = node.id();
-        self.nodes.push(node);
-        id
+        if let Some(existing_node) = self
+            .nodes
+            .iter()
+            .find(|existing_node| existing_node.maybe_eq(&node))
+        {
+            existing_node.id
+        } else {
+            let id = node.id();
+            self.nodes.push(node);
+            id
+        }
     }
 
     /// Add an edge between two nodes to this graph.
     pub fn add_edge(&mut self, edge: CallEdge) {
-        self.edges.push(edge);
+        self.edges.insert(edge);
     }
 
     /// Find a node of `LocalFn` kind.
@@ -264,6 +284,13 @@ impl CallNode {
     /// Get the id of this node.
     pub fn id(&self) -> usize {
         self.id
+    }
+
+    fn maybe_eq(&self, rhs: &Self) -> bool {
+        self.label == rhs.label
+            && self.kind == rhs.kind
+            && self.panics == rhs.panics
+            && self.label.eq(&rhs.label)
     }
 }
 

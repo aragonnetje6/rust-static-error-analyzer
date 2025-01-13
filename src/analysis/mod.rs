@@ -29,18 +29,24 @@ pub fn analyze(context: TyCtxt, call_graph: &mut CallGraph) {
     }
 
     // Attach return type info
-    for edge in &mut call_graph.edges {
-        if edge.ty.is_none() {
-            let (ty, error) = types::get_error_or_type(
-                context,
-                edge.hir_id,
-                call_graph.nodes[edge.from].kind.def_id(),
-                call_graph.nodes[edge.to].kind.def_id(),
-            );
-            edge.ty = Some(ty);
-            edge.is_error = error;
-        }
-    }
+    call_graph.edges = call_graph
+        .edges
+        .iter()
+        .cloned()
+        .map(|mut edge| {
+            if edge.ty.is_none() {
+                let (ty, error) = types::get_error_or_type(
+                    context,
+                    edge.hir_id,
+                    call_graph.nodes[edge.from].kind.def_id(),
+                    call_graph.nodes[edge.to].kind.def_id(),
+                );
+                edge.ty = Some(ty);
+                edge.is_error = error;
+            }
+            edge
+        })
+        .collect();
 }
 
 /// Retrieve the entry node (aka main function) from the type context.
