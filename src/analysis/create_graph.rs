@@ -35,7 +35,7 @@ fn add_calls_from_function(
     let node = context.hir_node(fn_id);
 
     // Access the code block of the function
-    match node {
+    match dbg!(node) {
         rustc_hir::Node::Expr(expr) => {
             if let ExprKind::Block(block, _) = expr.kind {
                 graph = add_calls_from_block(context, from_node, block, graph);
@@ -419,7 +419,7 @@ fn get_function_calls_in_pattern(
             // No function calls here
         }
         PatKind::Expr(pat_expr) => {
-            res.extend(get_function_calls_in_pattern_expression(context, pat_expr))
+            res.extend(get_function_calls_in_pattern_expression(context, pat_expr));
         }
         PatKind::Guard(pat, expr) => {
             res.extend(get_function_calls_in_pattern(context, pat));

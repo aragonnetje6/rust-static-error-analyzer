@@ -23,13 +23,10 @@ use rustc_middle::ty::TyCtxt;
 pub fn analyze(context: TyCtxt) -> (CallGraph, ChainGraph) {
     // Get the entry point of the program
     let entry_node = get_entry_node(context);
-    dbg!(entry_node);
 
     // Create call graph
-    let mut call_graph = dbg!(create_graph::create_call_graph_from_root(
-        context,
-        entry_node.expect_item()
-    ));
+    let mut call_graph =
+        create_graph::create_call_graph_from_root(context, entry_node.expect_item());
 
     // Attach return type info
     for edge in &mut call_graph.edges {

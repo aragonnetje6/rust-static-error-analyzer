@@ -44,8 +44,7 @@ fn main() {
     let output_path = absolute_path(&args.output_file);
 
     // Extract the compiler arguments from running `cargo build`
-    let compiler_args = get_compiler_args(&args.manifest, &manifest_path)
-        .expect("Could not get arguments from cargo build!");
+    let compiler_commands = get_compiler_args(&args.manifest, &manifest_path);
 
     // Enable CTRL + C
     rustc_driver::install_ctrlc_handler();
@@ -58,14 +57,16 @@ fn main() {
     rustc_driver::init_rustc_env_logger(&early_dcx);
 
     // Run the compiler using the retrieved args.
-    let _exit_code = run_compiler(
-        compiler_args,
-        &mut AnalysisCallbacks {
-            output_path,
-            call_graph: args.call_graph,
-        },
-        using_internal_features,
-    );
+    for compiler_command in compiler_commands.bin_commands {
+        run_compiler(
+            compiler_command,
+            &mut AnalysisCallbacks {
+                output_path: output_path.clone(),
+                call_graph: args.call_graph,
+            },
+            using_internal_features.clone(),
+        );
+    }
 }
 
 /// Turn relative path into absolute path
@@ -75,22 +76,37 @@ fn absolute_path(cargo_path: &Path) -> PathBuf {
         .join(cargo_path)
 }
 
+#[derive(Debug)]
+struct CompilerCommands {
+    bin_commands: Vec<Vec<String>>,
+    lib_command: Option<Vec<String>>,
+}
+
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
-fn get_compiler_args(relative_manifest_path: &Path, manifest_path: &Path) -> Option<Vec<String>> {
+fn get_compiler_args(relative_manifest_path: &Path, manifest_path: &Path) -> CompilerCommands {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
 
-    let (package_name, bin_name) = get_package_name(manifest_path);
+    let manifest_info = get_manifest_info(manifest_path);
 
-    cargo_clean(manifest_path, &package_name);
+    cargo_clean(manifest_path, &manifest_info.package_name);
 
     let build_output = cargo_build_verbose(manifest_path);
 
-    let command = get_rustc_invocation(&build_output, &package_name, bin_name)?;
+    let invocations = get_rustc_invocations(&build_output, &manifest_info);
 
-    Some(split_args(
-        &relative_manifest_path.to_string_lossy(),
-        &command,
-    ))
+    let bin_commands = invocations
+        .bin_invocations
+        .iter()
+        .map(|invocation| split_args(relative_manifest_path, invocation))
+        .collect();
+    let lib_command = invocations
+        .lib_invocation
+        .map(|invocation| split_args(relative_manifest_path, &invocation));
+
+    CompilerCommands {
+        bin_commands,
+        lib_command,
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -101,7 +117,7 @@ enum StringArg {
 }
 
 /// Split up individual arguments from the command.
-fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
+fn split_args(relative_manifest_path: &Path, command: &str) -> Vec<String> {
     let mut res = vec![];
     let mut temp = StringArg::None;
 
@@ -111,9 +127,14 @@ fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
 
         // If this is the path to main.rs, prepend the relative path to the manifest, stripping away Cargo.toml
         if arg.contains("main.rs") {
-            let mut new_arg = String::from(relative_manifest_path.trim_end_matches("Cargo.toml"));
-            new_arg.push_str(&arg);
-            arg = new_arg;
+            arg = format!(
+                "{}/{arg}",
+                relative_manifest_path
+                    .parent()
+                    .expect("manifest folder invalid")
+                    .to_str()
+                    .expect("invalid characters in path")
+            );
         }
         temp = match temp {
             StringArg::None => {
@@ -149,19 +170,19 @@ fn split_args(relative_manifest_path: &str, command: &str) -> Vec<String> {
                 }
             }
             StringArg::SingleQuoted(mut temp) => {
-                temp.push_str(" ");
+                temp.push(' ');
                 if arg.ends_with('\'') {
                     temp.push_str(arg.strip_suffix('\'').expect("unquoting failure"));
                     res.push(temp);
                     StringArg::None
                 } else {
                     temp.push_str(&arg);
-                    temp.push_str(" ");
+                    temp.push(' ');
                     StringArg::SingleQuoted(temp)
                 }
             }
             StringArg::DoubleQouted(mut temp) => {
-                temp.push_str(" ");
+                temp.push(' ');
                 if arg.ends_with('"') {
                     temp.push_str(arg.strip_suffix('"').expect("unquoting failure"));
                     res.push(temp);
@@ -216,8 +237,14 @@ fn cargo_clean(manifest_path: &Path, package_name: &str) -> String {
     stderr
 }
 
+struct ManifestInfo {
+    package_name: String,
+    lib_name: Option<String>,
+    bin_names: Vec<String>,
+}
+
 /// Extract the package name from the given manifest.
-fn get_package_name(manifest_path: &Path) -> (String, Option<String>) {
+fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
     let file = std::fs::read(manifest_path).expect("Could not read manifest!");
     let content = String::from_utf8(file).expect("Invalid UTF8!");
     let table = content
@@ -230,19 +257,31 @@ fn get_package_name(manifest_path: &Path) -> (String, Option<String>) {
         .as_str()
         .expect("No name found in package information!")
         .to_owned();
-    if table.contains_key("bin") {
-        let binary_table = table["bin"]
-            .as_array()
-            .expect("'bin' is not an array!")
-            .first()
-            .expect("'bin' contains no values!")
-            .as_table()
-            .expect("'bin' is not a table!");
-        let binary_name = binary_table["name"].as_str().map(str::to_owned);
-        return (package_name, binary_name);
+    let bin_names = table
+        .get("bin")
+        .map(|bin| {
+            bin.as_array()
+                .expect("invalid bins section")
+                .iter()
+                .filter_map(|bin_entry| {
+                    bin_entry.as_table().expect("invalid bin entry").get("name")
+                })
+                .map(|name| name.as_str().expect("broken bin name").to_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let lib_name = table
+        .get("lib")
+        .map(|lib| lib.as_table().expect("invalid lib table"))
+        .and_then(|lib| {
+            lib.get("name")
+                .map(|name| name.as_str().expect("invalid lib name").to_owned())
+        });
+    ManifestInfo {
+        package_name,
+        lib_name,
+        bin_names,
     }
-
-    (package_name, None)
 }
 
 /// Run `cargo --version`.
@@ -284,31 +323,60 @@ fn cargo_build_verbose(manifest_path: &Path) -> String {
     stderr
 }
 
-/// Gets the rustc invocation command from the output of `cargo build -vv`.
-fn get_rustc_invocation(
-    build_output: &str,
-    package_name: &str,
-    bin_name: Option<String>,
-) -> Option<String> {
-    let name = bin_name
-        .unwrap_or(package_name.to_owned())
-        .replace('-', "_");
-    for line in build_output.split('\n') {
-        for part in line.split('`') {
-            for command in part.split("&& ") {
-                if command.contains("rustc")
-                    // && command.contains("--crate-type bin")
-                    // && !command.contains("build.rs")
-                    // && command.contains("main.rs")
-                    && command.contains(&format!("--crate-name {name}"))
-                {
-                    return Some(String::from(command));
-                }
-            }
-        }
-    }
+#[derive(Debug)]
+struct CompilerInvocations {
+    bin_invocations: Vec<String>,
+    lib_invocation: Option<String>,
+}
 
-    None
+/// Gets the rustc invocation command from the output of `cargo build -vv`.
+fn get_rustc_invocations(build_output: &str, manifest_info: &ManifestInfo) -> CompilerInvocations {
+    let bin_names: Vec<String> = manifest_info
+        .bin_names
+        .iter()
+        .cloned()
+        .chain([manifest_info.package_name.to_owned()])
+        .map(|name| name.replace("-", "_"))
+        .collect();
+    let lib_name = manifest_info
+        .lib_name
+        .as_ref()
+        .unwrap_or(&manifest_info.package_name)
+        .replace("-", "_");
+    let bin_invocations = build_output
+        .split('\n')
+        .flat_map(|line| {
+            line.split('`').flat_map(|part| {
+                part.split("&& ")
+                    .filter(|command| {
+                        command.contains("rustc")
+                            && bin_names
+                                .iter()
+                                .any(|name| command.contains(&format!("--crate-name {name}")))
+                            && command.contains("--crate-type bin")
+                    })
+                    .map(String::from)
+            })
+        })
+        .collect();
+    let lib_invocation = build_output
+        .split('\n')
+        .flat_map(|line| {
+            line.split('`').flat_map(|part| {
+                part.split("&& ")
+                    .filter(|command| {
+                        command.contains("rustc")
+                            && command.contains(&format!("--crate-name {lib_name}"))
+                            && command.contains("--crate-type lib")
+                    })
+                    .map(String::from)
+            })
+        })
+        .next();
+    CompilerInvocations {
+        bin_invocations,
+        lib_invocation,
+    }
 }
 
 /// Run a compiler with the provided arguments and callbacks.
@@ -335,10 +403,10 @@ struct AnalysisCallbacks {
 }
 
 impl rustc_driver::Callbacks for AnalysisCallbacks {
-    fn after_analysis<'tcx>(
+    fn after_analysis(
         &mut self,
         _compiler: &rustc_interface::interface::Compiler,
-        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        tcx: rustc_middle::ty::TyCtxt<'_>,
     ) -> Compilation {
         // Access type context
         println!("Analyzing output...");
