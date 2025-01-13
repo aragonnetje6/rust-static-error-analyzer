@@ -60,12 +60,12 @@ fn main() {
 
     // This allows tools to enable rust logging without having to magically match rustc’s tracing crate version.
     rustc_driver::init_rustc_env_logger(&early_dcx);
-    let mut callbacks = AnalysisCallbacks {
-        output_path: output_path.clone(),
-        print_call_graph: args.call_graph,
-        graph: Arc::new(Mutex::new(CallGraph::new(manifest_info.package_name))),
-        last: !compiler_commands.bin_commands.is_empty(),
-    };
+    let mut callbacks = AnalysisCallbacks::new(
+        output_path.clone(),
+        args.call_graph,
+        Arc::new(Mutex::new(CallGraph::new(manifest_info.package_name))),
+        !compiler_commands.bin_commands.is_empty(),
+    );
     // Run the compiler using the retrieved args.
     if let Some(compiler_command) = compiler_commands.lib_command {
         run_compiler(
@@ -468,6 +468,22 @@ struct AnalysisCallbacks {
     print_call_graph: bool,
     graph: Arc<Mutex<CallGraph>>,
     last: bool,
+}
+
+impl AnalysisCallbacks {
+    fn new(
+        output_path: PathBuf,
+        print_call_graph: bool,
+        graph: Arc<Mutex<CallGraph>>,
+        last: bool,
+    ) -> Self {
+        Self {
+            output_path,
+            print_call_graph,
+            graph,
+            last,
+        }
+    }
 }
 
 impl rustc_driver::Callbacks for AnalysisCallbacks {
