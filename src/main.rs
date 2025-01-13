@@ -57,6 +57,16 @@ fn main() {
     rustc_driver::init_rustc_env_logger(&early_dcx);
 
     // Run the compiler using the retrieved args.
+    if let Some(compiler_command) = compiler_commands.lib_command {
+        run_compiler(
+            compiler_command,
+            &mut AnalysisCallbacks {
+                output_path: output_path.clone(),
+                call_graph: args.call_graph,
+            },
+            using_internal_features.clone(),
+        );
+    }
     for compiler_command in compiler_commands.bin_commands {
         run_compiler(
             compiler_command,
@@ -97,11 +107,11 @@ fn get_compiler_args(relative_manifest_path: &Path, manifest_path: &Path) -> Com
     let bin_commands = invocations
         .bin_invocations
         .iter()
-        .map(|invocation| split_args(relative_manifest_path, invocation))
+        .map(|invocation| split_args(relative_manifest_path, invocation, &manifest_info))
         .collect();
     let lib_command = invocations
         .lib_invocation
-        .map(|invocation| split_args(relative_manifest_path, &invocation));
+        .map(|invocation| split_args(relative_manifest_path, &invocation, &manifest_info));
 
     CompilerCommands {
         bin_commands,
@@ -117,7 +127,11 @@ enum StringArg {
 }
 
 /// Split up individual arguments from the command.
-fn split_args(relative_manifest_path: &Path, command: &str) -> Vec<String> {
+fn split_args(
+    relative_manifest_path: &Path,
+    command: &str,
+    manifest_info: &ManifestInfo,
+) -> Vec<String> {
     let mut res = vec![];
     let mut temp = StringArg::None;
 
@@ -126,15 +140,17 @@ fn split_args(relative_manifest_path: &Path, command: &str) -> Vec<String> {
         let mut arg = arg.to_owned();
 
         // If this is the path to main.rs, prepend the relative path to the manifest, stripping away Cargo.toml
-        if arg.contains("main.rs") {
-            arg = format!(
-                "{}/{arg}",
-                relative_manifest_path
-                    .parent()
-                    .expect("manifest folder invalid")
-                    .to_str()
-                    .expect("invalid characters in path")
-            );
+        for target in manifest_info.bins.iter().chain(&manifest_info.lib) {
+            if arg.contains(&target.path) {
+                arg = format!(
+                    "{}/{arg}",
+                    relative_manifest_path
+                        .parent()
+                        .expect("manifest folder invalid")
+                        .to_str()
+                        .expect("invalid characters in path")
+                );
+            }
         }
         temp = match temp {
             StringArg::None => {
@@ -237,10 +253,17 @@ fn cargo_clean(manifest_path: &Path, package_name: &str) -> String {
     stderr
 }
 
+#[derive(Debug)]
 struct ManifestInfo {
     package_name: String,
-    lib_name: Option<String>,
-    bin_names: Vec<String>,
+    lib: Option<Crate>,
+    bins: Vec<Crate>,
+}
+
+#[derive(Debug)]
+struct Crate {
+    name: String,
+    path: String,
 }
 
 /// Extract the package name from the given manifest.
@@ -257,30 +280,58 @@ fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
         .as_str()
         .expect("No name found in package information!")
         .to_owned();
-    let bin_names = table
+    let root_path = manifest_path
+        .parent()
+        .expect("crate directory does not exist");
+    let bins = table
         .get("bin")
         .map(|bin| {
             bin.as_array()
                 .expect("invalid bins section")
                 .iter()
                 .filter_map(|bin_entry| {
-                    bin_entry.as_table().expect("invalid bin entry").get("name")
+                    let bin_name = bin_entry
+                        .as_table()
+                        .and_then(|bin| bin.get("name"))
+                        .and_then(|name| name.as_str())
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| package_name.clone());
+                    let bin_path = bin_entry
+                        .as_table()
+                        .and_then(|bin| bin.get("path"))
+                        .and_then(|name| name.as_str())
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| String::from("src/main.rs"));
+                    root_path.join(&bin_path).exists().then(|| Crate {
+                        name: bin_name,
+                        path: bin_path,
+                    })
                 })
-                .map(|name| name.as_str().expect("broken bin name").to_owned())
                 .collect()
         })
         .unwrap_or_default();
     let lib_name = table
         .get("lib")
-        .map(|lib| lib.as_table().expect("invalid lib table"))
-        .and_then(|lib| {
-            lib.get("name")
-                .map(|name| name.as_str().expect("invalid lib name").to_owned())
-        });
+        .and_then(|lib| lib.as_table())
+        .and_then(|lib| lib.get("name"))
+        .and_then(|name| name.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| package_name.clone());
+    let lib_path = table
+        .get("lib")
+        .and_then(|lib| lib.as_table())
+        .and_then(|lib| lib.get("path"))
+        .and_then(|name| name.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| String::from("src/lib.rs"));
+    let lib = root_path.join(&lib_path).exists().then(|| Crate {
+        name: lib_name,
+        path: lib_path,
+    });
     ManifestInfo {
         package_name,
-        lib_name,
-        bin_names,
+        lib,
+        bins,
     }
 }
 
@@ -332,15 +383,16 @@ struct CompilerInvocations {
 /// Gets the rustc invocation command from the output of `cargo build -vv`.
 fn get_rustc_invocations(build_output: &str, manifest_info: &ManifestInfo) -> CompilerInvocations {
     let bin_names: Vec<String> = manifest_info
-        .bin_names
+        .bins
         .iter()
-        .cloned()
+        .map(|bin| bin.name.to_owned())
         .chain([manifest_info.package_name.to_owned()])
         .map(|name| name.replace("-", "_"))
         .collect();
     let lib_name = manifest_info
-        .lib_name
+        .lib
         .as_ref()
+        .map(|lib| &lib.name)
         .unwrap_or(&manifest_info.package_name)
         .replace("-", "_");
     let bin_invocations = build_output
