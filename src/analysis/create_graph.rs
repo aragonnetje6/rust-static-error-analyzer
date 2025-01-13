@@ -186,7 +186,13 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
     let calls = get_function_calls_in_block(context, block, true);
 
     // Add edges for all function calls
-    for (node_kind, call_id, add_edge, propagates) in calls {
+    for FunctionCallInfo {
+        node_kind,
+        hir_id: call_id,
+        add_edge,
+        propagates,
+    } in calls
+    {
         match node_kind {
             CallNodeKind::LocalFn(def_id, hir_id) => {
                 if let Some(node) = graph.find_local_fn_node(hir_id) {
@@ -234,8 +240,8 @@ fn get_function_calls_in_block(
     context: TyCtxt,
     block: &Block,
     is_fn: bool,
-) -> Vec<(CallNodeKind, HirId, bool, bool)> {
-    let mut res: Vec<(CallNodeKind, HirId, bool, bool)> = vec![];
+) -> Vec<FunctionCallInfo> {
+    let mut res: Vec<FunctionCallInfo> = vec![];
 
     // If the block has an ending expression add calls from there
     // If this block is that of a function, this is a return statement
@@ -245,8 +251,19 @@ fn get_function_calls_in_block(
                 return get_function_calls_in_block(context, b, is_fn);
             }
         } else if is_fn {
-            for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
-                res.push((kind, id, add_edge, true));
+            for FunctionCallInfo {
+                node_kind: kind,
+                hir_id: id,
+                add_edge,
+                propagates: _,
+            } in get_function_calls_in_expression(context, exp)
+            {
+                res.push(FunctionCallInfo {
+                    node_kind: kind,
+                    hir_id: id,
+                    add_edge,
+                    propagates: true,
+                });
             }
         } else {
             res.extend(get_function_calls_in_expression(context, exp));
@@ -273,23 +290,37 @@ fn get_function_calls_in_block(
     res
 }
 
+struct FunctionCallInfo {
+    node_kind: CallNodeKind,
+    hir_id: HirId,
+    add_edge: bool,
+    propagates: bool,
+}
+
 /// Retrieve a vec of all function calls made within an expression.
 #[allow(clippy::too_many_lines)]
-fn get_function_calls_in_expression(
-    context: TyCtxt,
-    expr: &Expr,
-) -> Vec<(CallNodeKind, HirId, bool, bool)> {
-    let mut res: Vec<(CallNodeKind, HirId, bool, bool)> = vec![];
+fn get_function_calls_in_expression(context: TyCtxt, expr: &Expr) -> Vec<FunctionCallInfo> {
+    let mut res: Vec<FunctionCallInfo> = vec![];
 
     // Match the kind of expression
     match expr.kind {
         ExprKind::Call(func, args) => {
             if let Some(def_id) = get_call_def_id(context, expr.hir_id) {
                 let node_kind = get_node_kind_from_def_id(context, def_id);
-                res.push((node_kind, expr.hir_id, true, false));
+                res.push(FunctionCallInfo {
+                    node_kind,
+                    hir_id: expr.hir_id,
+                    add_edge: true,
+                    propagates: false,
+                });
             } else if let ExprKind::Path(qpath) = func.kind {
                 if let Some((node_kind, _add_edge)) = get_node_kind_from_path(context, qpath) {
-                    res.push((node_kind, expr.hir_id, true, false));
+                    res.push(FunctionCallInfo {
+                        node_kind,
+                        hir_id: expr.hir_id,
+                        add_edge: true,
+                        propagates: false,
+                    });
                 }
             }
             for exp in args {
@@ -299,20 +330,33 @@ fn get_function_calls_in_expression(
         ExprKind::MethodCall(_path, exp, args, _span) => {
             if let Some(def_id) = get_call_def_id(context, expr.hir_id) {
                 let node_kind = get_node_kind_from_def_id(context, def_id);
-                res.push((node_kind, expr.hir_id, true, false));
+                res.push(FunctionCallInfo {
+                    node_kind,
+                    hir_id: expr.hir_id,
+                    add_edge: true,
+                    propagates: false,
+                });
             } else if let Some(def_id) = context
                 .typeck(expr.hir_id.owner.def_id)
                 .type_dependent_def_id(expr.hir_id)
             {
                 if let Some(local_id) = def_id.as_local() {
-                    res.push((
-                        CallNodeKind::local_fn(def_id, context.local_def_id_to_hir_id(local_id)),
-                        expr.hir_id,
-                        true,
-                        false,
-                    ));
+                    res.push(FunctionCallInfo {
+                        node_kind: CallNodeKind::local_fn(
+                            def_id,
+                            context.local_def_id_to_hir_id(local_id),
+                        ),
+                        hir_id: expr.hir_id,
+                        add_edge: true,
+                        propagates: false,
+                    });
                 } else {
-                    res.push((CallNodeKind::non_local_fn(def_id), expr.hir_id, true, false));
+                    res.push(FunctionCallInfo {
+                        node_kind: CallNodeKind::non_local_fn(def_id),
+                        hir_id: expr.hir_id,
+                        add_edge: true,
+                        propagates: false,
+                    });
                 }
             }
             res.extend(get_function_calls_in_expression(context, exp));
@@ -322,8 +366,19 @@ fn get_function_calls_in_expression(
         }
         ExprKind::Match(exp, arms, src) => {
             if let MatchSource::TryDesugar(_hir) = src {
-                for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
-                    res.push((kind, id, add_edge, true));
+                for FunctionCallInfo {
+                    node_kind: kind,
+                    hir_id: id,
+                    add_edge,
+                    propagates: _,
+                } in get_function_calls_in_expression(context, exp)
+                {
+                    res.push(FunctionCallInfo {
+                        node_kind: kind,
+                        hir_id: id,
+                        add_edge,
+                        propagates: true,
+                    });
                 }
 
                 return res;
@@ -342,7 +397,12 @@ fn get_function_calls_in_expression(
                 closure.def_id.to_def_id(),
                 context.local_def_id_to_hir_id(closure.def_id),
             );
-            res.push((node_kind, expr.hir_id, false, false));
+            res.push(FunctionCallInfo {
+                node_kind,
+                hir_id: expr.hir_id,
+                add_edge: false,
+                propagates: false,
+            });
         }
         ExprKind::ConstBlock(block) => {
             let node = context.hir_node(block.hir_id);
@@ -403,7 +463,12 @@ fn get_function_calls_in_expression(
         }
         ExprKind::Path(path) => {
             if let Some((node_kind, add_edge)) = get_node_kind_from_path(context, path) {
-                res.push((node_kind, expr.hir_id, add_edge, false));
+                res.push(FunctionCallInfo {
+                    node_kind,
+                    hir_id: expr.hir_id,
+                    add_edge,
+                    propagates: false,
+                });
             }
         }
         ExprKind::AddrOf(_borrow, _mut, exp) => {
@@ -416,8 +481,19 @@ fn get_function_calls_in_expression(
         }
         ExprKind::Ret(opt) => {
             if let Some(exp) = opt {
-                for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
-                    res.push((kind, id, add_edge, true));
+                for FunctionCallInfo {
+                    node_kind: kind,
+                    hir_id: id,
+                    add_edge,
+                    propagates: _,
+                } in get_function_calls_in_expression(context, exp)
+                {
+                    res.push(FunctionCallInfo {
+                        node_kind: kind,
+                        hir_id: id,
+                        add_edge,
+                        propagates: true,
+                    });
                 }
             }
         }
@@ -451,10 +527,7 @@ fn get_function_calls_in_expression(
 }
 
 /// Retrieve a vec of all function calls made from within a pattern (although I think it can never contain one).
-fn get_function_calls_in_pattern(
-    context: TyCtxt,
-    pat: &Pat,
-) -> Vec<(CallNodeKind, HirId, bool, bool)> {
+fn get_function_calls_in_pattern(context: TyCtxt, pat: &Pat) -> Vec<FunctionCallInfo> {
     match pat.kind {
         PatKind::Binding(_, _, _, opt_pat) => {
             opt_pat.map(|pat| get_function_calls_in_pattern(context, pat))
@@ -504,7 +577,7 @@ fn get_function_calls_in_pattern(
 fn get_function_calls_in_pattern_expression(
     context: TyCtxt<'_>,
     exp: &PatExpr<'_>,
-) -> Vec<(CallNodeKind, HirId, bool, bool)> {
+) -> Vec<FunctionCallInfo> {
     if let PatExprKind::ConstBlock(const_block) = exp.kind {
         get_function_calls_in_block(
             context,
