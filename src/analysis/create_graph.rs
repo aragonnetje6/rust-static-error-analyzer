@@ -321,18 +321,14 @@ fn get_function_calls_in_expression(
             }
         }
         ExprKind::Match(exp, arms, src) => {
-            match src {
-                MatchSource::TryDesugar(_hir) => {
-                    for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
-                        res.push((kind, id, add_edge, true));
-                    }
+            if let MatchSource::TryDesugar(_hir) = src {
+                for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
+                    res.push((kind, id, add_edge, true));
+                }
 
-                    return res;
-                }
-                _ => {
-                    res.extend(get_function_calls_in_expression(context, exp));
-                }
+                return res;
             }
+            res.extend(get_function_calls_in_expression(context, exp));
             for arm in arms {
                 res.extend(get_function_calls_in_expression(context, arm.body));
                 if let Some(guard) = arm.guard {
@@ -418,9 +414,6 @@ fn get_function_calls_in_expression(
                 res.extend(get_function_calls_in_expression(context, exp));
             }
         }
-        ExprKind::Continue(_dest) => {
-            // No function calls here
-        }
         ExprKind::Ret(opt) => {
             if let Some(exp) = opt {
                 for (kind, id, add_edge, _) in get_function_calls_in_expression(context, exp) {
@@ -445,7 +438,8 @@ fn get_function_calls_in_expression(
         ExprKind::UnsafeBinderCast(_unsafe_binder_cast_kind, expr, ..) => {
             res.extend(get_function_calls_in_expression(context, expr));
         }
-        ExprKind::Err(..)
+        ExprKind::Continue(..)
+        | ExprKind::Err(..)
         | ExprKind::InlineAsm(..)
         | ExprKind::OffsetOf(..)
         | ExprKind::Lit(..) => {

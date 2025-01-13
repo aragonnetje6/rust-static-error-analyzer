@@ -314,7 +314,8 @@ impl PartialEq for CallNodeKind {
                 def_id1 == def_id2 && hir_id1 == hir_id2
             }
             (CallNodeKind::NonLocalFn(id1), CallNodeKind::NonLocalFn(id2)) => id1 == id2,
-            _ => false,
+            (CallNodeKind::LocalFn(..), CallNodeKind::NonLocalFn(..))
+            | (CallNodeKind::NonLocalFn(..), CallNodeKind::LocalFn(..)) => false,
         }
     }
 }
