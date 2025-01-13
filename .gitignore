@@ -12,3 +12,4 @@ rustc-ice-*.txt
 
 # Output graphs
 *.dot
+*.svg
