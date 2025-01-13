@@ -1,5 +1,5 @@
-use rustc_hir::def_id::DefId;
 use rustc_hir::HirId;
+use rustc_hir::{def_id::DefId, Node};
 use rustc_middle::{
     mir::TerminatorKind,
     ty::{GenericArg, Ty, TyCtxt, TyKind},
@@ -8,11 +8,8 @@ use rustc_middle::{
 /// Get the return type of a called function.
 #[allow(clippy::similar_names)]
 fn get_call_type(context: TyCtxt, call_id: HirId, caller_id: DefId, called_id: DefId) -> Ty {
-    if let Some(ty) = get_call_type_using_mir(context, call_id, caller_id) {
-        ty
-    } else {
-        get_call_type_using_context(context, called_id)
-    }
+    get_call_type_using_mir(context, call_id, caller_id)
+        .unwrap_or_else(|| get_call_type_using_context(context, called_id))
 }
 
 /// Extracts the return type of a called function using just the function's `DefId`.
@@ -31,27 +28,27 @@ fn get_call_type_using_context(context: TyCtxt, called_id: DefId) -> Ty {
 
 /// Extracts the return type of a called function using its call's `HirId`, as well as the caller's `DefId`.
 /// Returns `None` if no MIR is available or the call was not found (e.g. due to desugaring/optimizations).
-fn get_call_type_using_mir(context: TyCtxt, call_id: HirId, caller_id: DefId) -> Option<Ty> {
+fn get_call_type_using_mir(context: TyCtxt, hir_id: HirId, caller_id: DefId) -> Option<Ty> {
     if !context.is_mir_available(caller_id) {
         return None;
     }
 
-    let mir = context.optimized_mir(caller_id);
-    let call_expr = context.hir_node(call_id).expect_expr();
-
-    for block in mir.basic_blocks.iter() {
-        if let Some(terminator) = &block.terminator {
-            if let TerminatorKind::Call { func, fn_span, .. } = &terminator.kind {
-                if call_expr.span.hi() == fn_span.hi() {
-                    if let Some((def_id, args)) = func.const_fn_def() {
-                        return Some(
-                            context
-                                .type_of(def_id)
-                                .instantiate(context, args)
-                                .fn_sig(context)
-                                .output()
-                                .skip_binder(),
-                        );
+    if let Node::Expr(call_expr) = context.hir_node(hir_id) {
+        let mir = context.optimized_mir(caller_id);
+        for block in mir.basic_blocks.iter() {
+            if let Some(terminator) = &block.terminator {
+                if let TerminatorKind::Call { func, fn_span, .. } = &terminator.kind {
+                    if call_expr.span.hi() == fn_span.hi() {
+                        if let Some((def_id, args)) = func.const_fn_def() {
+                            return Some(
+                                context
+                                    .type_of(def_id)
+                                    .instantiate(context, args)
+                                    .fn_sig(context)
+                                    .output()
+                                    .skip_binder(),
+                            );
+                        }
                     }
                 }
             }
@@ -79,7 +76,7 @@ pub fn get_error_or_type(
 
     let res = extract_error_from_result(result);
 
-    (res.clone().unwrap_or(format!("{ret_ty}")), res.is_some())
+    (res.clone().unwrap_or(ret_ty.to_string()), res.is_some())
 }
 
 /// Extract the Result type from any type.

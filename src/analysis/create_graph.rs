@@ -188,7 +188,7 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
     // Add edges for all function calls
     for FunctionCallInfo {
         node_kind,
-        hir_id: call_id,
+        hir_id,
         add_edge,
         propagates,
     } in calls
@@ -198,7 +198,7 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                 if let Some(node) = graph.find_local_fn_node(hir_id) {
                     // We have already encountered this local function, so just add the edge
                     if add_edge {
-                        graph.add_edge(CallEdge::new(from, node.id(), call_id, propagates));
+                        graph.add_edge(CallEdge::new_untyped(from, node.id(), hir_id, propagates));
                     }
                 } else {
                     // We have not yet explored this local function, so add new node and edge,
@@ -208,7 +208,7 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                     let id = graph.add_node(context.def_path_str(def_id), node_kind, panics);
 
                     if add_edge {
-                        graph.add_edge(CallEdge::new(from, id, call_id, propagates));
+                        graph.add_edge(CallEdge::new_untyped(from, id, hir_id, propagates));
                     }
 
                     add_calls_from_function(context, id, hir_id, graph);
@@ -218,7 +218,7 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                 if let Some(node) = graph.find_non_local_fn_node(def_id) {
                     // We have already encountered this non-local function, so just add the edge
                     if add_edge {
-                        graph.add_edge(CallEdge::new(from, node.id(), call_id, propagates));
+                        graph.add_edge(CallEdge::new_untyped(from, node.id(), hir_id, propagates));
                     }
                 } else {
                     // We have not yet explored this non-local function, so add new node and edge
@@ -227,7 +227,7 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                         graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, false);
 
                     if add_edge {
-                        graph.add_edge(CallEdge::new(from, id, call_id, propagates));
+                        graph.add_edge(CallEdge::new_untyped(from, id, hir_id, propagates));
                     }
                 }
             }
@@ -252,15 +252,15 @@ fn get_function_calls_in_block(
             }
         } else if is_fn {
             for FunctionCallInfo {
-                node_kind: kind,
-                hir_id: id,
+                node_kind,
+                hir_id,
                 add_edge,
                 propagates: _,
             } in get_function_calls_in_expression(context, exp)
             {
                 res.push(FunctionCallInfo {
-                    node_kind: kind,
-                    hir_id: id,
+                    node_kind,
+                    hir_id,
                     add_edge,
                     propagates: true,
                 });

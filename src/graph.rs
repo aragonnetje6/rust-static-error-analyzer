@@ -29,7 +29,7 @@ pub enum CallNodeKind {
 pub struct CallEdge {
     pub from: usize,
     pub to: usize,
-    pub call_id: HirId,
+    pub hir_id: HirId,
     pub ty: Option<String>,
     pub propagates: bool,
     pub is_error: bool,
@@ -288,16 +288,27 @@ impl CallNodeKind {
 }
 
 impl CallEdge {
-    /// Create a new edge.
-    pub fn new(from: usize, to: usize, call_id: HirId, propagates: bool) -> Self {
-        CallEdge {
+    pub fn new(
+        from: usize,
+        to: usize,
+        hir_id: HirId,
+        ty: Option<String>,
+        propagates: bool,
+        is_error: bool,
+    ) -> Self {
+        Self {
             from,
             to,
-            call_id,
-            ty: None,
+            hir_id,
+            ty,
             propagates,
-            is_error: false,
+            is_error,
         }
+    }
+
+    /// Create a new edge.
+    pub fn new_untyped(from: usize, to: usize, hir_id: HirId, propagates: bool) -> Self {
+        CallEdge::new(from, to, hir_id, None, propagates, false)
     }
 }
 

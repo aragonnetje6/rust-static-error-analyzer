@@ -33,7 +33,7 @@ pub fn analyze(context: TyCtxt, call_graph: &mut CallGraph) {
         if edge.ty.is_none() {
             let (ty, error) = types::get_error_or_type(
                 context,
-                edge.call_id,
+                edge.hir_id,
                 call_graph.nodes[edge.from].kind.def_id(),
                 call_graph.nodes[edge.to].kind.def_id(),
             );
