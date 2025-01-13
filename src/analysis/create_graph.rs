@@ -14,7 +14,7 @@ pub fn update_call_graph_with_node(context: TyCtxt, graph: &mut CallGraph, node:
         Node::Item(item) => update_call_graph_with_item(context, graph, item),
         Node::ImplItem(impl_item) => update_call_graph_with_impl_item(context, graph, impl_item),
         Node::TraitItem(trait_item) => {
-            update_call_graph_with_trait_item(context, graph, trait_item)
+            update_call_graph_with_trait_item(context, graph, trait_item);
         }
         Node::ForeignItem(..)
         | Node::Variant(..)
@@ -143,7 +143,34 @@ fn add_calls_from_function(context: TyCtxt, from_node: usize, fn_id: HirId, grap
                 add_calls_from_function(context, from_node, id.hir_id, graph);
             }
         }
-        _ => {}
+        Node::Param(..)
+        | Node::ForeignItem(..)
+        | Node::Variant(..)
+        | Node::Field(..)
+        | Node::AnonConst(..)
+        | Node::ConstBlock(..)
+        | Node::ConstArg(..)
+        | Node::ExprField(..)
+        | Node::Stmt(..)
+        | Node::PathSegment(..)
+        | Node::Ty(..)
+        | Node::AssocItemConstraint(..)
+        | Node::TraitRef(..)
+        | Node::OpaqueTy(..)
+        | Node::Pat(..)
+        | Node::PatField(..)
+        | Node::PatExpr(..)
+        | Node::Arm(..)
+        | Node::LetStmt(..)
+        | Node::Ctor(..)
+        | Node::Lifetime(..)
+        | Node::GenericParam(..)
+        | Node::Crate(..)
+        | Node::Infer(..)
+        | Node::WherePredicate(..)
+        | Node::PreciseCapturingNonLifetimeArg(..)
+        | Node::Synthetic
+        | Node::Err(..) => {}
     }
 }
 
@@ -434,9 +461,6 @@ fn get_function_calls_in_pattern(
     let mut res: Vec<(CallNodeKind, HirId, bool, bool)> = vec![];
 
     match pat.kind {
-        PatKind::Wild | PatKind::Never => {
-            // No function calls here
-        }
         PatKind::Binding(_mode, _hir_id, _ident, opt_pat) => {
             if let Some(p) = opt_pat {
                 res.extend(get_function_calls_in_pattern(context, p));
@@ -457,9 +481,6 @@ fn get_function_calls_in_pattern(
                 res.extend(get_function_calls_in_pattern(context, p));
             }
         }
-        PatKind::Path(_path) => {
-            // No function calls here
-        }
         PatKind::Tuple(pats, _pos) => {
             for p in pats {
                 res.extend(get_function_calls_in_pattern(context, p));
@@ -471,9 +492,6 @@ fn get_function_calls_in_pattern(
         PatKind::Ref(p, _mut) => {
             res.extend(get_function_calls_in_pattern(context, p));
         }
-        // PatKind::Lit(exp) => {
-        //     res.extend(get_function_calls_in_expression(context, exp));
-        // }
         PatKind::Range(a, b, _end) => {
             if let Some(exp) = a {
                 res.extend(get_function_calls_in_pattern_expression(context, exp));
@@ -493,9 +511,6 @@ fn get_function_calls_in_pattern(
                 res.extend(get_function_calls_in_pattern(context, p));
             }
         }
-        PatKind::Err(_err) => {
-            // No function calls here
-        }
         PatKind::Expr(pat_expr) => {
             res.extend(get_function_calls_in_pattern_expression(context, pat_expr));
         }
@@ -503,8 +518,8 @@ fn get_function_calls_in_pattern(
             res.extend(get_function_calls_in_pattern(context, pat));
             res.extend(get_function_calls_in_expression(context, expr));
         }
+        PatKind::Wild | PatKind::Never | PatKind::Path(..) | PatKind::Err(..) => {}
     }
-
     res
 }
 
@@ -513,7 +528,6 @@ fn get_function_calls_in_pattern_expression(
     exp: &PatExpr<'_>,
 ) -> Vec<(CallNodeKind, HirId, bool, bool)> {
     match exp.kind {
-        rustc_hir::PatExprKind::Lit { .. } => None, // no function calls here
         rustc_hir::PatExprKind::ConstBlock(const_block) => {
             let node = context.hir_node(const_block.hir_id);
             Some(get_function_calls_in_block(
@@ -522,7 +536,7 @@ fn get_function_calls_in_pattern_expression(
                 false,
             ))
         }
-        rustc_hir::PatExprKind::Path(..) => None, // no function calls
+        rustc_hir::PatExprKind::Lit { .. } | rustc_hir::PatExprKind::Path(..) => None, // no function calls
     }
     .unwrap_or_default()
 }

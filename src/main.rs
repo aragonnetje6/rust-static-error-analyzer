@@ -116,16 +116,16 @@ fn get_compiler_args(
 
     let build_output = cargo_build_verbose(manifest_path);
 
-    let invocations = get_rustc_invocations(&build_output, &manifest_info);
+    let invocations = get_rustc_invocations(&build_output, manifest_info);
 
     let bin_commands = invocations
         .bin_invocations
         .iter()
-        .map(|invocation| split_args(relative_manifest_path, invocation, &manifest_info))
+        .map(|invocation| split_args(relative_manifest_path, invocation, manifest_info))
         .collect();
     let lib_command = invocations
         .lib_invocation
-        .map(|invocation| split_args(relative_manifest_path, &invocation, &manifest_info));
+        .map(|invocation| split_args(relative_manifest_path, &invocation, manifest_info));
 
     CompilerCommands {
         bin_commands,
@@ -307,16 +307,12 @@ fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
                     let bin_name = bin_entry
                         .as_table()
                         .and_then(|bin| bin.get("name"))
-                        .and_then(|name| name.as_str())
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| package_name.clone());
+                        .and_then(|name| name.as_str()).map_or_else(|| package_name.clone(), str::to_owned);
                     let bin_path = bin_entry
                         .as_table()
                         .and_then(|bin| bin.get("path"))
-                        .and_then(|name| name.as_str())
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| String::from("src/main.rs"));
-                    root_path.join(&bin_path).exists().then(|| Crate {
+                        .and_then(|name| name.as_str()).map_or_else(|| String::from("src/main.rs"), str::to_owned);
+                    root_path.join(&bin_path).exists().then_some(Crate {
                         name: bin_name,
                         path: bin_path,
                     })
@@ -328,17 +324,13 @@ fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
         .get("lib")
         .and_then(|lib| lib.as_table())
         .and_then(|lib| lib.get("name"))
-        .and_then(|name| name.as_str())
-        .map(str::to_owned)
-        .unwrap_or_else(|| package_name.clone());
+        .and_then(|name| name.as_str()).map_or_else(|| package_name.clone(), str::to_owned);
     let lib_path = table
         .get("lib")
         .and_then(|lib| lib.as_table())
         .and_then(|lib| lib.get("path"))
-        .and_then(|name| name.as_str())
-        .map(str::to_owned)
-        .unwrap_or_else(|| String::from("src/lib.rs"));
-    let lib = root_path.join(&lib_path).exists().then(|| Crate {
+        .and_then(|name| name.as_str()).map_or_else(|| String::from("src/lib.rs"), str::to_owned);
+    let lib = root_path.join(&lib_path).exists().then_some(Crate {
         name: lib_name,
         path: lib_path,
     });
@@ -399,16 +391,15 @@ fn get_rustc_invocations(build_output: &str, manifest_info: &ManifestInfo) -> Co
     let bin_names: Vec<String> = manifest_info
         .bins
         .iter()
-        .map(|bin| bin.name.to_owned())
-        .chain([manifest_info.package_name.to_owned()])
-        .map(|name| name.replace("-", "_"))
+        .map(|bin| bin.name.clone())
+        .chain([manifest_info.package_name.clone()])
+        .map(|name| name.replace('-', "_"))
         .collect();
     let lib_name = manifest_info
         .lib
         .as_ref()
-        .map(|lib| &lib.name)
-        .unwrap_or(&manifest_info.package_name)
-        .replace("-", "_");
+        .map_or(&manifest_info.package_name, |lib| &lib.name)
+        .replace('-', "_");
     let bin_invocations = build_output
         .split('\n')
         .flat_map(|line| {
