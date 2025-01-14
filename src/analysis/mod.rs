@@ -3,8 +3,9 @@ mod create_graph;
 mod panics;
 mod types;
 
-use crate::graph::CallGraph;
 use rustc_middle::ty::TyCtxt;
+
+use crate::graph::CallGraph;
 
 /// Analysis steps:
 ///
@@ -23,7 +24,7 @@ use rustc_middle::ty::TyCtxt;
 /// Step 4: Parse the output graph to show individual propagation chains
 pub fn analyze(context: TyCtxt, call_graph: &mut CallGraph) {
     // Get the entry point(s) of the program
-    let nodes = get_entry_node(context);
+    let nodes = get_entry_nodes(context);
 
     for node in nodes {
         create_graph::update_call_graph_with_node(context, call_graph, node);
@@ -51,7 +52,7 @@ pub fn analyze(context: TyCtxt, call_graph: &mut CallGraph) {
 }
 
 /// Retrieve the entry node (aka main function) from the type context.
-fn get_entry_node(context: TyCtxt) -> Vec<rustc_hir::Node> {
+fn get_entry_nodes(context: TyCtxt) -> Vec<rustc_hir::Node> {
     context
         .hir()
         .body_owners()

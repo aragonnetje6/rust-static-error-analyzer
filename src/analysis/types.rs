@@ -1,5 +1,4 @@
-use rustc_hir::HirId;
-use rustc_hir::{def_id::DefId, Node};
+use rustc_hir::{def_id::DefId, HirId, Node};
 use rustc_middle::{
     mir::TerminatorKind,
     ty::{GenericArg, Ty, TyCtxt, TyKind},

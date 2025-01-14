@@ -17,9 +17,11 @@ use analysis::calls_to_chains;
 use clap::Parser;
 use graph::CallGraph;
 use rustc_driver::Compilation;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    sync::{Arc, Mutex},
+};
 use toml::Table;
 
 #[derive(Parser)]
@@ -494,11 +496,11 @@ impl rustc_driver::Callbacks for AnalysisCallbacks {
         analysis::analyze(tcx, &mut call_graph);
 
         if self.last {
+            let chain_graph = calls_to_chains::to_chains(&call_graph);
             let dot = if self.print_call_graph {
                 call_graph.to_dot()
             } else {
                 // Parse graph to show chains
-                let chain_graph = calls_to_chains::to_chains(&call_graph);
                 chain_graph.to_dot()
             };
 
