@@ -81,7 +81,7 @@ fn is_panic(qpath: QPath) -> bool {
         if path
             .segments
             .get(path.segments.len().saturating_sub(2))
-            .is_some_and(|segment| segment.ident.as_str().matches("panicking").any(|_| true))
+            .is_some_and(|segment| segment.ident.as_str().matches("panicking").next().is_some())
         {
             return true;
         }
