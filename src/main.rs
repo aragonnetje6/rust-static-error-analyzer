@@ -82,11 +82,11 @@ fn main() {
         .expect("arc still referenced")
         .into_inner()
         .expect("mutex poisoned");
+    // Parse graph to show chains
     let chain_graph = calls_to_chains::to_chains(&call_graph);
     let dot = if args.call_graph {
         call_graph.to_dot()
     } else {
-        // Parse graph to show chains
         chain_graph.to_dot()
     };
 
