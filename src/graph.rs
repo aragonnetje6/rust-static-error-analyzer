@@ -15,6 +15,7 @@ pub struct CallNode {
     pub label: String,
     pub kind: CallNodeKind,
     pub panics: PanicInfo,
+    pub span: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,8 +237,14 @@ impl CallGraph {
     }
 
     /// Add a node to this graph, returning its id.
-    pub fn add_node(&mut self, label: String, node_kind: CallNodeKind, panics: PanicInfo) -> usize {
-        let node = CallNode::new(self.nodes.len(), label, node_kind, panics);
+    pub fn add_node(
+        &mut self,
+        label: String,
+        node_kind: CallNodeKind,
+        panics: PanicInfo,
+        span: Option<String>,
+    ) -> usize {
+        let node = CallNode::new(self.nodes.len(), label, node_kind, panics, span);
         if let Some(existing_node) = self
             .nodes
             .iter()
@@ -304,12 +311,19 @@ impl CallGraph {
 
 impl CallNode {
     /// Create a new node.
-    fn new(id: usize, label: String, kind: CallNodeKind, panics: PanicInfo) -> Self {
+    fn new(
+        id: usize,
+        label: String,
+        kind: CallNodeKind,
+        panics: PanicInfo,
+        span: Option<String>,
+    ) -> Self {
         CallNode {
             id,
             label,
             kind,
             panics,
+            span,
         }
     }
 

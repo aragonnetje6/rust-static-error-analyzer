@@ -53,6 +53,9 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
         .iter()
         .filter(|node| node.panics.explicit_invocation)
         .count();
+    for node in &graph.nodes {
+        println!("{:?}", node.span);
+    }
 
     let average_size = (total_size as f64) / (count as f64);
 

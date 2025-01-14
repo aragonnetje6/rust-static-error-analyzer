@@ -46,7 +46,6 @@ fn main() {
 
     let args = Args::parse();
     let manifest_path = absolute_path(&args.manifest);
-    let output_path = absolute_path(&args.output_file);
 
     let manifest_info = get_manifest_info(&manifest_path);
 
@@ -62,12 +61,9 @@ fn main() {
 
     // This allows tools to enable rust logging without having to magically match rustc’s tracing crate version.
     rustc_driver::init_rustc_env_logger(&early_dcx);
-    let mut callbacks = AnalysisCallbacks::new(
-        output_path.clone(),
-        args.call_graph,
-        Arc::new(Mutex::new(CallGraph::new(manifest_info.package_name))),
-        compiler_commands.bin_commands.is_empty(),
-    );
+    let mut callbacks = AnalysisCallbacks::new(Arc::new(Mutex::new(CallGraph::new(
+        manifest_info.package_name,
+    ))));
     // Run the compiler using the retrieved args.
     if let Some(compiler_command) = compiler_commands.lib_command {
         run_compiler(
@@ -76,20 +72,38 @@ fn main() {
             using_internal_features.clone(),
         );
     }
-    if let Some((last, rest)) = compiler_commands.bin_commands.split_last() {
-        for compiler_command in rest {
-            run_compiler(
-                compiler_command.clone(),
-                &mut callbacks,
-                using_internal_features.clone(),
-            );
-        }
-        callbacks.last = true;
+    for compiler_command in compiler_commands.bin_commands {
         run_compiler(
-            last.clone(),
+            compiler_command.clone(),
             &mut callbacks,
             using_internal_features.clone(),
         );
+    }
+    let call_graph = Arc::into_inner(callbacks.graph)
+        .expect("arc still referenced")
+        .into_inner()
+        .expect("mutex poisoned");
+    let chain_graph = calls_to_chains::to_chains(&call_graph);
+    let dot = if args.call_graph {
+        call_graph.to_dot()
+    } else {
+        // Parse graph to show chains
+        chain_graph.to_dot()
+    };
+
+    println!("Writing graph...");
+
+    match std::fs::write(&args.output_file, dot.clone()) {
+        Ok(()) => {
+            println!("Done!");
+            println!("Wrote to {}", &args.output_file.display());
+        }
+        Err(e) => {
+            eprintln!("Could not write output!");
+            eprintln!("{e}");
+            eprintln!();
+            println!("{dot}");
+        }
     }
 }
 
@@ -461,25 +475,12 @@ fn run_compiler(
 
 #[derive(Debug)]
 struct AnalysisCallbacks {
-    output_path: PathBuf,
-    print_call_graph: bool,
     graph: Arc<Mutex<CallGraph>>,
-    last: bool,
 }
 
 impl AnalysisCallbacks {
-    fn new(
-        output_path: PathBuf,
-        print_call_graph: bool,
-        graph: Arc<Mutex<CallGraph>>,
-        last: bool,
-    ) -> Self {
-        Self {
-            output_path,
-            print_call_graph,
-            graph,
-            last,
-        }
+    fn new(graph: Arc<Mutex<CallGraph>>) -> Self {
+        Self { graph }
     }
 }
 
@@ -494,31 +495,6 @@ impl rustc_driver::Callbacks for AnalysisCallbacks {
         // Analyze the program using the type context
         let mut call_graph = self.graph.lock().expect("locking failed");
         analysis::analyze(tcx, &mut call_graph);
-
-        if self.last {
-            let chain_graph = calls_to_chains::to_chains(&call_graph);
-            let dot = if self.print_call_graph {
-                call_graph.to_dot()
-            } else {
-                // Parse graph to show chains
-                chain_graph.to_dot()
-            };
-
-            println!("Writing graph...");
-
-            match std::fs::write(&self.output_path, dot.clone()) {
-                Ok(()) => {
-                    println!("Done!");
-                    println!("Wrote to {}", &self.output_path.display());
-                }
-                Err(e) => {
-                    eprintln!("Could not write output!");
-                    eprintln!("{e}");
-                    eprintln!();
-                    println!("{dot}");
-                }
-            }
-        }
 
         // No need to compile further
         Compilation::Stop
