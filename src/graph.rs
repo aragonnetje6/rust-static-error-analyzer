@@ -159,6 +159,7 @@ pub struct ChainGraph {
 pub struct ChainNode {
     id: usize,
     label: String,
+    panics: PanicInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +186,15 @@ impl<'a> dot::Labeller<'a, ChainNode, ChainEdge> for ChainGraph {
 
     fn edge_label(&self, e: &ChainEdge) -> LabelText<'a> {
         LabelText::label(e.label.clone().unwrap_or(String::from("unknown")))
+    }
+
+    fn node_color(&'a self, node: &ChainNode) -> Option<LabelText<'a>> {
+        match (node.panics.explicit_invocation, node.panics.doc_section) {
+            (true, true) => Some(LabelText::label("purple")),
+            (true, false) => Some(LabelText::label("red")),
+            (false, true) => Some(LabelText::label("blue")),
+            (false, false) => todo!(),
+        }
     }
 }
 
@@ -396,14 +406,6 @@ impl ChainGraph {
         }
     }
 
-    pub fn add_node(&mut self, label: String) -> usize {
-        let id = self.nodes.len();
-
-        self.nodes.push(ChainNode::new(id, label));
-
-        id
-    }
-
     pub fn add_edge(&mut self, from: usize, to: usize, label: Option<String>) {
         self.edges.push(ChainEdge::new(from, to, label));
     }
@@ -414,12 +416,20 @@ impl ChainGraph {
         dot::render(self, &mut buf).expect("graph rendering error");
         String::from_utf8(buf).expect("graph string invalid")
     }
+
+    pub fn add_node_from_call_node(&mut self, node: CallNode) -> usize {
+        let id = self.nodes.len();
+
+        self.nodes.push(ChainNode::new(id, node.label, node.panics));
+
+        id
+    }
 }
 
 impl ChainNode {
     /// Create a new node.
-    fn new(id: usize, label: String) -> Self {
-        ChainNode { id, label }
+    fn new(id: usize, label: String, panics: PanicInfo) -> Self {
+        ChainNode { id, label, panics }
     }
 }
 

@@ -60,7 +60,6 @@ fn update_call_graph_with_trait_item(
             let panics = get_panic_info_local(context, body_id);
             let node_kind =
                 CallNodeKind::local_fn(trait_item.hir_id().owner.to_def_id(), trait_item.hir_id());
-            // TODO: actually search for panics
             let node_id =
                 graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, panics);
 
@@ -228,7 +227,6 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                     }
                 } else {
                     // We have not yet explored this non-local function, so add new node and edge
-                    // TODO: actually search for panics
                     let id = graph.add_node(
                         context.def_path_str(node_kind.def_id()),
                         node_kind,

@@ -32,14 +32,14 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
                 let from = match node_map.entry(call.from) {
                     Entry::Occupied(e) => *e.get(),
                     Entry::Vacant(e) => {
-                        *e.insert(new_graph.add_node(graph.nodes[call.from].label.clone()))
+                        *e.insert(new_graph.add_node_from_call_node(graph.nodes[call.from].clone()))
                     }
                 };
                 // Ditto
                 let to = match node_map.entry(call.to) {
                     Entry::Occupied(e) => *e.get(),
                     Entry::Vacant(e) => {
-                        *e.insert(new_graph.add_node(graph.nodes[call.to].label.clone()))
+                        *e.insert(new_graph.add_node_from_call_node(graph.nodes[call.to].clone()))
                     }
                 };
                 // Add the edge

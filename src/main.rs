@@ -494,11 +494,11 @@ impl rustc_driver::Callbacks for AnalysisCallbacks {
         analysis::analyze(tcx, &mut call_graph);
 
         if self.last {
-            // Parse graph to show chains
-            let chain_graph = calls_to_chains::to_chains(&call_graph);
             let dot = if self.print_call_graph {
                 call_graph.to_dot()
             } else {
+                // Parse graph to show chains
+                let chain_graph = calls_to_chains::to_chains(&call_graph);
                 chain_graph.to_dot()
             };
 
