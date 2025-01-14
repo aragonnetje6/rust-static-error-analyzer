@@ -1,4 +1,7 @@
-use rustc_hir::{Block, BodyId, Expr, ExprKind, LetExpr, StructTailExpr};
+use rustc_hir::{
+    def::Res, Block, BodyId, Expr, ExprKind, HirId, LetExpr, LetStmt, Path, QPath, StmtKind,
+    StructTailExpr, TyKind,
+};
 use rustc_middle::ty::TyCtxt;
 
 use crate::graph::PanicInfo;
@@ -10,9 +13,11 @@ pub fn get_panic_info_local(context: TyCtxt<'_>, body_id: BodyId) -> PanicInfo {
 
 fn find_panic_in_expr(context: TyCtxt<'_>, outer_expr: &Expr<'_>) -> bool {
     match outer_expr.kind {
-        ExprKind::Call(expr, exprs) => {
-            is_panic(context, expr) || exprs.iter().any(|expr| find_panic_in_expr(context, expr))
-        }
+        ExprKind::Path(qpath) => is_panic(qpath),
+        ExprKind::Call(expr, exprs) => exprs
+            .iter()
+            .chain([expr])
+            .any(|expr| find_panic_in_expr(context, expr)),
         ExprKind::MethodCall(_, _, exprs, _) | ExprKind::Array(exprs) | ExprKind::Tup(exprs) => {
             exprs.iter().any(|expr| find_panic_in_expr(context, expr))
         }
@@ -64,7 +69,6 @@ fn find_panic_in_expr(context: TyCtxt<'_>, outer_expr: &Expr<'_>) -> bool {
         ExprKind::Closure(..)
         | ExprKind::ConstBlock(..)
         | ExprKind::Lit(..)
-        | ExprKind::Path(..)
         | ExprKind::Break(_, None)
         | ExprKind::Continue(..)
         | ExprKind::Ret(None)
@@ -75,10 +79,36 @@ fn find_panic_in_expr(context: TyCtxt<'_>, outer_expr: &Expr<'_>) -> bool {
     }
 }
 
-fn is_panic(context: TyCtxt<'_>, expr: &Expr<'_>) -> bool {
-    todo!()
+fn is_panic(qpath: QPath) -> bool {
+    if let QPath::Resolved(None, path) = qpath {
+        if path
+            .segments
+            .get(path.segments.len().saturating_sub(2))
+            .is_some_and(|segment| segment.ident.as_str() == "panicking")
+        {
+            return true;
+        }
+    }
+    false
 }
 
-fn find_panic_in_block(context: TyCtxt<'_>, outer_block: &Block<'_>) -> bool {
-    todo!()
+fn find_panic_in_block(context: TyCtxt<'_>, block: &Block<'_>) -> bool {
+    for statement in block.stmts {
+        match statement.kind {
+            StmtKind::Let(&LetStmt { init: None, .. }) | StmtKind::Item(..) => {}
+            StmtKind::Let(&LetStmt {
+                init: Some(expr), ..
+            })
+            | StmtKind::Expr(expr)
+            | StmtKind::Semi(expr) => {
+                if find_panic_in_expr(context, expr) {
+                    return true;
+                }
+            }
+        }
+    }
+    if let Some(expr) = block.expr {
+        return find_panic_in_expr(context, expr);
+    }
+    false
 }

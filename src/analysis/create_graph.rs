@@ -206,7 +206,11 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                 } else {
                     // We have not yet explored this local function, so add new node and edge,
                     // and explore it.
-                    let panics = panics::get_panic_info_local(context, BodyId { hir_id });
+                    let panics = context
+                        .hir()
+                        .maybe_body_owned_by(def_id.as_local().expect("nonlocal"))
+                        .map(|x| panics::get_panic_info_local(context, x.id()))
+                        .unwrap_or_default();
                     let id = graph.add_node(context.def_path_str(def_id), node_kind, panics);
 
                     if add_edge {

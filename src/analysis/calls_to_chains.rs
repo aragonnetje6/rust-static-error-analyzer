@@ -47,6 +47,13 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
             }
         }
     }
+
+    let panic_invocations = graph
+        .nodes
+        .iter()
+        .filter(|node| node.panics.explicit_invocation)
+        .count();
+
     let average_size = (total_size as f64) / (count as f64);
 
     println!();
@@ -54,6 +61,7 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
     println!("The biggest chain consists of {max_size} function calls.");
     println!("The longest error path consists of {max_depth} chained function calls.");
     println!("The average chain consists of {average_size} function calls.");
+    println!("There are {panic_invocations} invocations of the panic macro.");
     println!();
 
     new_graph

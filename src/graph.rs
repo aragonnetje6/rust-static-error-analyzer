@@ -193,7 +193,7 @@ impl<'a> dot::Labeller<'a, ChainNode, ChainEdge> for ChainGraph {
             (true, true) => Some(LabelText::label("purple")),
             (true, false) => Some(LabelText::label("red")),
             (false, true) => Some(LabelText::label("blue")),
-            (false, false) => todo!(),
+            (false, false) => None,
         }
     }
 }
