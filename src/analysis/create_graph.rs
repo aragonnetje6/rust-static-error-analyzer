@@ -2,9 +2,9 @@ use crate::graph::{CallEdge, CallGraph, CallNodeKind, PanicInfo};
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::DefId;
 use rustc_hir::{
-    Block, BodyId, Expr, ExprKind, HirId, ImplItem, ImplItemKind, Item, ItemKind, LetStmt,
-    MatchSource, Node, Pat, PatExpr, PatExprKind, PatKind, QPath, StmtKind, StructTailExpr,
-    TraitFn, TraitItem, TraitItemKind, TyKind,
+    Block, Expr, ExprKind, HirId, ImplItem, ImplItemKind, Item, ItemKind, LetStmt, MatchSource,
+    Node, Pat, PatExpr, PatExprKind, PatKind, QPath, StmtKind, StructTailExpr, TraitFn, TraitItem,
+    TraitItemKind, TyKind,
 };
 use rustc_middle::mir::TerminatorKind;
 use rustc_middle::ty::TyCtxt;

@@ -1,7 +1,4 @@
-use rustc_hir::{
-    def::Res, Block, BodyId, Expr, ExprKind, HirId, LetExpr, LetStmt, Path, QPath, StmtKind,
-    StructTailExpr, TyKind,
-};
+use rustc_hir::{Block, BodyId, Expr, ExprKind, LetExpr, LetStmt, QPath, StmtKind, StructTailExpr};
 use rustc_middle::ty::TyCtxt;
 
 use crate::graph::PanicInfo;
