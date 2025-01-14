@@ -9,6 +9,8 @@ use rustc_hir::{
 use rustc_middle::mir::TerminatorKind;
 use rustc_middle::ty::TyCtxt;
 
+use super::panics;
+
 /// Create a call graph starting from the provided root node.
 pub fn update_call_graph_with_node(context: TyCtxt, graph: &mut CallGraph, node: Node) {
     match node {
@@ -57,7 +59,7 @@ fn update_call_graph_with_trait_item(
 ) {
     match trait_item.kind {
         TraitItemKind::Fn(_, TraitFn::Provided(body_id)) => {
-            let panics = get_panic_info_local(context, body_id);
+            let panics = panics::get_panic_info_local(context, body_id);
             let node_kind =
                 CallNodeKind::local_fn(trait_item.hir_id().owner.to_def_id(), trait_item.hir_id());
             let node_id =
@@ -70,11 +72,6 @@ fn update_call_graph_with_trait_item(
     }
 }
 
-fn get_panic_info_local(_context: TyCtxt<'_>, _body_id: BodyId) -> PanicInfo {
-    // TODO: actually search for panics
-    PanicInfo::default()
-}
-
 fn update_call_graph_with_impl_item(
     context: TyCtxt<'_>,
     graph: &mut CallGraph,
@@ -84,7 +81,7 @@ fn update_call_graph_with_impl_item(
         ImplItemKind::Fn(_, body_id) => {
             let node_kind =
                 CallNodeKind::local_fn(impl_item.hir_id().owner.to_def_id(), impl_item.hir_id());
-            let panics = get_panic_info_local(context, body_id);
+            let panics = panics::get_panic_info_local(context, body_id);
             let node_id =
                 graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, panics);
 
@@ -99,7 +96,7 @@ fn update_call_graph_with_item(context: TyCtxt<'_>, graph: &mut CallGraph, item:
     match item.kind {
         ItemKind::Fn { body, .. } => {
             let node_kind = CallNodeKind::local_fn(item.hir_id().owner.to_def_id(), item.hir_id());
-            let panics = get_panic_info_local(context, body);
+            let panics = panics::get_panic_info_local(context, body);
             let node_id =
                 graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, panics);
 
@@ -209,7 +206,7 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                 } else {
                     // We have not yet explored this local function, so add new node and edge,
                     // and explore it.
-                    let panics = get_panic_info_local(context, BodyId { hir_id });
+                    let panics = panics::get_panic_info_local(context, BodyId { hir_id });
                     let id = graph.add_node(context.def_path_str(def_id), node_kind, panics);
 
                     if add_edge {

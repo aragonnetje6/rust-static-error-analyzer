@@ -1,5 +1,6 @@
 pub mod calls_to_chains;
 mod create_graph;
+mod panics;
 mod types;
 
 use crate::graph::CallGraph;
