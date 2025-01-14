@@ -14,7 +14,28 @@ pub struct CallNode {
     id: usize,
     pub label: String,
     pub kind: CallNodeKind,
-    pub panics: bool,
+    pub panics: PanicInfo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PanicInfo {
+    pub explicit_invocation: bool,
+    pub doc_section: bool,
+}
+
+impl Default for PanicInfo {
+    fn default() -> Self {
+        Self::new(false, false)
+    }
+}
+
+impl PanicInfo {
+    pub fn new(explicit_invocation: bool, doc_section: bool) -> Self {
+        Self {
+            explicit_invocation,
+            doc_section,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -67,10 +88,11 @@ impl<'a> dot::Labeller<'a, CallNode, CallEdge> for CallGraph {
     }
 
     fn node_color(&'a self, n: &CallNode) -> Option<LabelText<'a>> {
-        if n.panics {
-            Some(LabelText::label("red"))
-        } else {
-            None
+        match (n.panics.explicit_invocation, n.panics.doc_section) {
+            (true, true) => Some(LabelText::label("purple")),
+            (true, false) => Some(LabelText::label("red")),
+            (false, true) => Some(LabelText::label("blue")),
+            (false, false) => None,
         }
     }
 
@@ -204,7 +226,7 @@ impl CallGraph {
     }
 
     /// Add a node to this graph, returning its id.
-    pub fn add_node(&mut self, label: String, node_kind: CallNodeKind, panics: bool) -> usize {
+    pub fn add_node(&mut self, label: String, node_kind: CallNodeKind, panics: PanicInfo) -> usize {
         let node = CallNode::new(self.nodes.len(), label, node_kind, panics);
         if let Some(existing_node) = self
             .nodes
@@ -272,7 +294,7 @@ impl CallGraph {
 
 impl CallNode {
     /// Create a new node.
-    fn new(id: usize, label: String, kind: CallNodeKind, panics: bool) -> Self {
+    fn new(id: usize, label: String, kind: CallNodeKind, panics: PanicInfo) -> Self {
         CallNode {
             id,
             label,

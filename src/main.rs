@@ -357,7 +357,6 @@ fn cargo_version() -> String {
 
 /// Run `cargo build -v` on the given manifest.
 fn cargo_build_verbose(manifest_path: &Path) -> String {
-    // TODO: interrupt build as to not compile the program twice
     println!("Building package...");
     let output = Command::new("cargo")
         .arg("build")

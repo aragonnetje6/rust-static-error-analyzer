@@ -1,10 +1,10 @@
-use crate::graph::{CallEdge, CallGraph, CallNodeKind};
+use crate::graph::{CallEdge, CallGraph, CallNodeKind, PanicInfo};
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::DefId;
 use rustc_hir::{
-    Block, Expr, ExprKind, HirId, ImplItem, ImplItemKind, Item, ItemKind, LetStmt, MatchSource,
-    Node, Pat, PatExpr, PatExprKind, PatKind, QPath, StmtKind, StructTailExpr, TraitFn, TraitItem,
-    TraitItemKind, TyKind,
+    Block, BodyId, Expr, ExprKind, HirId, ImplItem, ImplItemKind, Item, ItemKind, LetStmt,
+    MatchSource, Node, Pat, PatExpr, PatExprKind, PatKind, QPath, StmtKind, StructTailExpr,
+    TraitFn, TraitItem, TraitItemKind, TyKind,
 };
 use rustc_middle::mir::TerminatorKind;
 use rustc_middle::ty::TyCtxt;
@@ -57,17 +57,23 @@ fn update_call_graph_with_trait_item(
 ) {
     match trait_item.kind {
         TraitItemKind::Fn(_, TraitFn::Provided(body_id)) => {
+            let panics = get_panic_info_local(context, body_id);
             let node_kind =
                 CallNodeKind::local_fn(trait_item.hir_id().owner.to_def_id(), trait_item.hir_id());
             // TODO: actually search for panics
             let node_id =
-                graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, false);
+                graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, panics);
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
             add_calls_from_function(context, node_id, body_id.hir_id, graph);
         }
         TraitItemKind::Fn(..) | TraitItemKind::Const(..) | TraitItemKind::Type(..) => {}
     }
+}
+
+fn get_panic_info_local(_context: TyCtxt<'_>, _body_id: BodyId) -> PanicInfo {
+    // TODO: actually search for panics
+    PanicInfo::default()
 }
 
 fn update_call_graph_with_impl_item(
@@ -79,9 +85,9 @@ fn update_call_graph_with_impl_item(
         ImplItemKind::Fn(_, body_id) => {
             let node_kind =
                 CallNodeKind::local_fn(impl_item.hir_id().owner.to_def_id(), impl_item.hir_id());
-            // TODO: actually search for panics
+            let panics = get_panic_info_local(context, body_id);
             let node_id =
-                graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, false);
+                graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, panics);
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
             add_calls_from_function(context, node_id, body_id.hir_id, graph);
@@ -93,9 +99,10 @@ fn update_call_graph_with_impl_item(
 fn update_call_graph_with_item(context: TyCtxt<'_>, graph: &mut CallGraph, item: &Item<'_>) {
     match item.kind {
         ItemKind::Fn { body, .. } => {
-            let node = CallNodeKind::local_fn(item.hir_id().owner.to_def_id(), item.hir_id());
-            // TODO: actually search for panics
-            let node_id = graph.add_node(context.def_path_str(node.def_id()), node, false);
+            let node_kind = CallNodeKind::local_fn(item.hir_id().owner.to_def_id(), item.hir_id());
+            let panics = get_panic_info_local(context, body);
+            let node_id =
+                graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, panics);
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
             add_calls_from_function(context, node_id, body.hir_id, graph);
@@ -203,8 +210,7 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                 } else {
                     // We have not yet explored this local function, so add new node and edge,
                     // and explore it.
-                    // TODO: actually search for panics
-                    let panics = false;
+                    let panics = get_panic_info_local(context, BodyId { hir_id });
                     let id = graph.add_node(context.def_path_str(def_id), node_kind, panics);
 
                     if add_edge {
@@ -223,8 +229,11 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                 } else {
                     // We have not yet explored this non-local function, so add new node and edge
                     // TODO: actually search for panics
-                    let id =
-                        graph.add_node(context.def_path_str(node_kind.def_id()), node_kind, false);
+                    let id = graph.add_node(
+                        context.def_path_str(node_kind.def_id()),
+                        node_kind,
+                        PanicInfo::default(),
+                    );
 
                     if add_edge {
                         graph.add_edge(CallEdge::new_untyped(from, id, hir_id, propagates));
