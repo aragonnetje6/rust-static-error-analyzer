@@ -682,6 +682,71 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
     ))(input)
 }
 
+fn unsafe_binder_cast_kind(_input: &str) -> IResult<&str, ()> {
+    todo!()
+}
+
+fn inline_asm(_input: &str) -> IResult<&str, ()> {
+    todo!()
+}
+
+fn struct_expr(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("StructExpr"),
+            curlied(tuple((
+                struct_field("qself", option(q_self)),
+                struct_field("path", path),
+                struct_field("fields", list(expr_field)),
+                struct_field("rest", struct_rest),
+            ))),
+        ),
+    )(input)
+}
+
+fn struct_rest(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Base"), parend(expr))),
+        value((), preceded(spaced_tag("Rest"), parend(span))),
+        value((), spaced_tag("None")),
+    ))(input)
+}
+
+fn expr_field(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("ExprField"),
+            curlied(tuple((
+                struct_field("attrs", list(attribute)),
+                struct_field("id", node_id),
+                struct_field("span", span),
+                struct_field("ident", ident),
+                struct_field("expr", expr),
+                struct_field("is_shorthand", parse_bool),
+                struct_field("is_placeholder", parse_bool),
+            ))),
+        ),
+    )(input)
+}
+
+fn borrow_kind(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Ref"), spaced_tag("Raw")))(input)
+}
+
+fn range_limits(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("HalfOpen"), spaced_tag("Closed")))(input)
+}
+
+fn gen_block_kind(input: &str) -> IResult<&str, &str> {
+    alt((
+        spaced_tag("Async"),
+        spaced_tag("Gen"),
+        spaced_tag("AsyncGen"),
+    ))(input)
+}
+
 fn closure(input: &str) -> IResult<&str, ()> {
     value(
         (),
