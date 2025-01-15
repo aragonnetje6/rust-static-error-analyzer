@@ -1,7 +1,7 @@
 use nom::{
     branch::alt,
     bytes::complete::{escaped, is_not, tag},
-    character::complete::{multispace0, one_of},
+    character::complete::{self, multispace0, one_of},
     combinator::{map, value},
     error::ParseError,
     multi::separated_list0,
@@ -95,6 +95,17 @@ fn krate(input: &str) -> IResult<&str, Crate> {
     )(input)
 }
 
+fn node_id(input: &str) -> IResult<&str, u32> {
+    preceded(spaced_tag("NodeId"), parend(complete::u32))(input)
+}
+
+fn parse_bool(input: &str) -> IResult<&str, bool> {
+    alt((
+        value(true, spaced_tag("true")),
+        value(false, spaced_tag("false")),
+    ))(input)
+}
+
 #[derive(Debug, Clone)]
 struct Attribute<'a> {
     kind: AttrKind<'a>,
@@ -120,6 +131,14 @@ fn attribute(input: &str) -> IResult<&str, Attribute> {
         ),
         |(kind, _, _, span)| Attribute::new(kind, span),
     )(input)
+}
+
+fn attr_id(input: &str) -> IResult<&str, u32> {
+    preceded(spaced_tag("NodeId"), parend(complete::u32))(input)
+}
+
+fn attr_style(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Outer"), spaced_tag("Inner")))(input)
 }
 
 #[derive(Debug, Clone)]
@@ -155,7 +174,23 @@ struct Item<'a> {
     kind: ItemKind<'a>,
 }
 
-fn item(input: &str) -> IResult<&str, Attribute> {
+impl<'a> Item<'a> {
+    fn new(
+        attrs: Vec<Attribute<'a>>,
+        span: Span<'a>,
+        ident: Ident<'a>,
+        kind: ItemKind<'a>,
+    ) -> Self {
+        Self {
+            attrs,
+            span,
+            ident,
+            kind,
+        }
+    }
+}
+
+fn item(input: &str) -> IResult<&str, Item> {
     map(
         preceded(
             spaced_tag("Item"),
@@ -169,7 +204,7 @@ fn item(input: &str) -> IResult<&str, Attribute> {
                 struct_field("tokens", tokens),
             ))),
         ),
-        |(kind, _, _, span)| Attribute::new(kind, span),
+        |(attrs, _, span, _, ident, kind, _)| Item::new(attrs, span, ident, kind),
     )(input)
 }
 
