@@ -56,15 +56,26 @@ where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    preceded(pair(spaced_tag(name), tag(":")), value)
+    delimited(pair(spaced_tag(name), tag(":")), value, spaced_tag(","))
 }
 
-fn list<'a, O, E, P>(list_item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Vec<O>, E>
+fn list<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Vec<O>, E>
 where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    squared(separated_list0(spaced_tag(","), list_item))
+    squared(separated_list0(spaced_tag(","), item))
+}
+
+fn option<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Option<O>, E>
+where
+    E: ParseError<&'a str>,
+    P: Parser<&'a str, O, E>,
+{
+    alt((
+        map(spaced_tag("None"), |_| None),
+        map(preceded(spaced_tag("Some"), parend(item)), Some),
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +171,70 @@ fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
     ))
 }
 
+fn normal_attr(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("NormalAttr"),
+            curlied(tuple((
+                struct_field("item", attr_item),
+                struct_field("tokens", option(tokens)),
+            ))),
+        ),
+    )(input)
+}
+
+fn attr_item(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("AttrItem"),
+            curlied(tuple((
+                struct_field("safety", safety),
+                struct_field("path", path),
+                struct_field("args", attr_args),
+                struct_field("tokens", option(tokens)),
+            ))),
+        ),
+    )(input)
+}
+
+fn safety(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Unsafe"), parend(span))),
+        value((), preceded(spaced_tag("Safe"), parend(span))),
+        value((), spaced_tag("Default")),
+    ))(input)
+}
+
+fn path(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Path"),
+            curlied(tuple((
+                struct_field("span", span),
+                struct_field("segments", list(path_segment)),
+                struct_field("tokens", option(tokens)),
+            ))),
+        ),
+    )(input)
+}
+
+fn path_segment(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("PathSegment"),
+            curlied(tuple((
+                struct_field("ident", ident),
+                struct_field("id", node_id),
+                struct_field("args", option(generic_args)),
+            ))),
+        ),
+    )(input)
+}
+
 #[derive(Debug, Clone)]
 enum CommentKind {
     Line,
@@ -214,7 +289,7 @@ struct Span<'a>(&'a str);
 fn spaced_string(input: &str) -> IResult<&str, &str> {
     spaced(delimited(
         tag("\""),
-        escaped(is_not("\"'"), '\\', one_of("\"'")),
+        escaped(is_not("\"'"), '\\', one_of("\"'\\")),
         tag("\""),
     ))(input)
 }
@@ -237,9 +312,10 @@ fn modspans(input: &str) -> IResult<&str, Span> {
 }
 
 #[derive(Debug, Clone)]
-struct Ident<'a> {
-    symbol: &'a str,
-    span: Span<'a>,
+struct Ident<'a>(&'a str);
+
+fn ident(input: &str) -> IResult<&str, Ident> {
+    map(spaced_string, Ident)(input)
 }
 
 #[derive(Debug, Clone)]
