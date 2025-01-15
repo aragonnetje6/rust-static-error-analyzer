@@ -292,7 +292,7 @@ fn lifetime(input: &str) -> IResult<&str, ()> {
         separated_pair(
             complete::u32,
             spaced_tag(":"),
-            pair(spaced_tag("'"), complete::none_of(")")),
+            pair(spaced_tag("'"), is_not(")")),
         ),
     )(input)
 }
@@ -680,6 +680,186 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
         ),
         value((), spaced_tag("Dummy")),
     ))(input)
+}
+
+fn closure(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Closure"),
+            curlied(tuple((
+                struct_field("binder", closure_binder),
+                struct_field("capture_clause", capture_by),
+                struct_field("constness", parse_const),
+                struct_field("coroutine_kind", option(coroutine_kind)),
+                struct_field("movability", movability),
+                struct_field("fn_decl", fn_decl),
+                struct_field("body", expr),
+                struct_field("fn_decl_span", span),
+                struct_field("fn_arg_span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn closure_binder(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("NotPresent")),
+        value(
+            (),
+            preceded(
+                spaced_tag("NotPresent"),
+                curlied(tuple((
+                    struct_field("span", span),
+                    struct_field("generic_params", list(generic_param)),
+                ))),
+            ),
+        ),
+    ))(input)
+}
+
+fn generic_param(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("GenericParam"),
+            curlied(tuple((
+                struct_field("id", node_id),
+                struct_field("ident", ident),
+                struct_field("attrs", list(attribute)),
+                struct_field("bounds", list(generic_bound)),
+                struct_field("is_placeholder", parse_bool),
+                struct_field("kind", generic_param_kind),
+                struct_field("colon_span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn generic_bound(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Trait"), parend(poly_trait_ref))),
+        value((), preceded(spaced_tag("Outlives"), parend(lifetime))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Use"),
+                parend(separated_pair(
+                    list(precise_capturing_arg),
+                    spaced_tag(","),
+                    span,
+                )),
+            ),
+        ),
+    ))(input)
+}
+
+fn precise_capturing_arg(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Lifetime"), parend(lifetime))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Arg"),
+                parend(separated_pair(path, spaced_tag(","), node_id)),
+            ),
+        ),
+    ))(input)
+}
+
+fn poly_trait_ref(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("PolyTraitRef"),
+            curlied(tuple((
+                struct_field("bound_generic_params", list(generic_param)),
+                struct_field("modifiers", trait_bound_modifiers),
+                struct_field("trait_ref", trait_ref),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn trait_bound_modifiers(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("TraitBoundModifiers"),
+            curlied(tuple((
+                struct_field("constness", bound_constness),
+                struct_field("asyncness", bound_asyncness),
+                struct_field("polarity", bound_polarity),
+            ))),
+        ),
+    )(input)
+}
+
+fn bound_constness(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Never")),
+        value((), preceded(spaced_tag("Always"), parend(span))),
+        value((), preceded(spaced_tag("Maybe"), parend(span))),
+    ))(input)
+}
+
+fn bound_asyncness(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Normal")),
+        value((), preceded(spaced_tag("Async"), parend(span))),
+    ))(input)
+}
+
+fn bound_polarity(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Positive")),
+        value((), preceded(spaced_tag("Negative"), parend(span))),
+        value((), preceded(spaced_tag("Maybe"), parend(span))),
+    ))(input)
+}
+
+fn trait_ref(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("TraitRef"),
+            curlied(tuple((
+                struct_field("path", path),
+                struct_field("ref_id", node_id),
+            ))),
+        ),
+    )(input)
+}
+
+fn match_kind(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Prefix"), spaced_tag("Postfix")))(input)
+}
+
+fn arm(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Arm"),
+            curlied(tuple((
+                struct_field("attrs", list(attribute)),
+                struct_field("pat", pat),
+                struct_field("guard", option(expr)),
+                struct_field("body", option(expr)),
+                struct_field("span", span),
+                struct_field("id", node_id),
+                struct_field("is_placeholder", parse_bool),
+            ))),
+        ),
+    )(input)
+}
+
+fn for_loop_kind(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("For"), spaced_tag("ForAwait")))(input)
+}
+
+fn label(input: &str) -> IResult<&str, &str> {
+    preceded(spaced_tag("label"), parend(is_not(")")))(input)
 }
 
 fn method_call(input: &str) -> IResult<&str, ()> {
