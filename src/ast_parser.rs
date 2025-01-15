@@ -1,24 +1,13 @@
 use nom::{
-    bytes::complete::tag,
-    character::complete::multispace0,
-    combinator::map,
+    branch::alt,
+    bytes::complete::{escaped, is_not, tag},
+    character::complete::{multispace0, one_of},
+    combinator::{map, value},
     error::ParseError,
     multi::separated_list0,
     sequence::{delimited, pair, preceded, tuple},
     IResult, Parser,
 };
-
-#[derive(Debug, Clone)]
-struct Crate<'a> {
-    attrs: Vec<Attribute<'a>>,
-    items: Vec<Item<'a>>,
-}
-
-impl<'a> Crate<'a> {
-    fn new(attrs: Vec<Attribute<'a>>, items: Vec<Item<'a>>) -> Self {
-        Self { attrs, items }
-    }
-}
 
 fn spaced<'a, O, E, P>(parser: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
 where
@@ -78,6 +67,18 @@ where
     squared(separated_list0(spaced_tag(","), list_item))
 }
 
+#[derive(Debug, Clone)]
+struct Crate<'a> {
+    attrs: Vec<Attribute<'a>>,
+    items: Vec<Item<'a>>,
+}
+
+impl<'a> Crate<'a> {
+    fn new(attrs: Vec<Attribute<'a>>, items: Vec<Item<'a>>) -> Self {
+        Self { attrs, items }
+    }
+}
+
 fn krate(input: &str) -> IResult<&str, Crate> {
     map(
         preceded(
@@ -127,10 +128,17 @@ enum AttrKind<'a> {
     DocComment(CommentKind, &'a str),
 }
 
-#[derive(Debug, Clone)]
-struct DocComment<'a> {
-    kind: CommentKind,
-    symbol: &'a str,
+fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
+    alt((
+        value(
+            AttrKind::Normal,
+            preceded(spaced_tag("Normal"), parend(normal_attr)),
+        ),
+        map(
+            preceded(spaced_tag("DocComment"), tuple((comment_kind, string))),
+            |(kind, symbol)| AttrKind::DocComment(kind, symbol),
+        ),
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -168,8 +176,36 @@ fn item(input: &str) -> IResult<&str, Attribute> {
 #[derive(Debug, Clone)]
 struct Span<'a>(&'a str);
 
+fn spaced_string(input: &str) -> IResult<&str, &str> {
+    spaced(delimited(
+        tag("\""),
+        escaped(is_not("\"'"), '\\', one_of("\"'")),
+        tag("\""),
+    ))(input)
+}
+
+fn span(input: &str) -> IResult<&str, Span> {
+    map(spaced_string, Span)(input)
+}
+
+fn modspans(input: &str) -> IResult<&str, Span> {
+    map(
+        preceded(
+            spaced_tag("Item"),
+            curlied(tuple((
+                struct_field("inner_span", span),
+                struct_field("outer_span", span),
+            ))),
+        ),
+        |(span, _)| span,
+    )(input)
+}
+
 #[derive(Debug, Clone)]
-struct Ident<'a>(&'a str);
+struct Ident<'a> {
+    symbol: &'a str,
+    span: Span<'a>,
+}
 
 #[derive(Debug, Clone)]
 enum ItemKind<'a> {
