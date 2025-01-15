@@ -779,6 +779,96 @@ fn pat(input: &str) -> IResult<&str, ()> {
     )(input)
 }
 
+fn pat_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Wild")),
+        value(
+            (),
+            preceded(
+                spaced_tag("Ident"),
+                parend(tuple((
+                    binding_mode,
+                    spaced_tag(","),
+                    ident,
+                    spaced_tag(","),
+                    option(pat),
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Struct"),
+                parend(tuple((
+                    option(q_self),
+                    spaced_tag(","),
+                    path,
+                    spaced_tag(","),
+                    list(pat_field),
+                    spaced_tag(","),
+                    pat_fields_rest,
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("TupleStruct"),
+                parend(tuple((
+                    option(q_self),
+                    spaced_tag(","),
+                    path,
+                    spaced_tag(","),
+                    list(pat),
+                ))),
+            ),
+        ),
+        value((), preceded(spaced_tag("Or"), parend(list(pat)))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Path"),
+                parend(separated_pair(option(q_self), spaced_tag(","), path)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Tuple"), parend(list(pat)))),
+        value((), preceded(spaced_tag("Box"), parend(pat))),
+        value((), preceded(spaced_tag("Deref"), parend(pat))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Ref"),
+                parend(separated_pair(pat, spaced_tag(","), mutability)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Expr"), parend(expr))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Range"),
+                parend(tuple((
+                    option(expr),
+                    spaced_tag(","),
+                    option(expr),
+                    spaced_tag(","),
+                    spanned_range_end,
+                ))),
+            ),
+        ),
+        value((), preceded(spaced_tag("Slice"), parend(list(pat)))),
+        value((), spaced_tag("Rest")),
+        value((), spaced_tag("Never")),
+        value(
+            (),
+            preceded(
+                spaced_tag("Guard"),
+                parend(separated_pair(pat, spaced_tag(","), expr)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Paren"), parend(pat))),
+    ))(input)
+}
+
 #[derive(Debug, Clone)]
 enum CommentKind {
     Line,
