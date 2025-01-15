@@ -1561,6 +1561,38 @@ fn item(input: &str) -> IResult<&str, Item> {
     )(input)
 }
 
+fn visibility(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Visibility"),
+            curlied(tuple((
+                struct_field("kind", visibility_kind),
+                struct_field("span", span),
+                struct_field("tokens", tokens),
+            ))),
+        ),
+    )
+}
+
+fn visibility_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Public")),
+        value((), spaced_tag("Inherited")),
+        value(
+            (),
+            preceded(
+                spaced_tag("Restricted"),
+                curlied(tuple((
+                    struct_field("path", path),
+                    struct_field("id", node_id),
+                    struct_field("shorthand", parse_bool),
+                ))),
+            ),
+        ),
+    ))(input)
+}
+
 #[derive(Debug, Clone)]
 struct Span<'a>(&'a str);
 
