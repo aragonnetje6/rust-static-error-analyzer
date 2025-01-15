@@ -944,7 +944,7 @@ fn spanned_range_end(input: &str) -> IResult<&str, ()> {
 
 fn range_end(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Included"), range_syntax)),
+        value((), preceded(spaced_tag("Included"), parend(range_syntax))),
         value((), spaced_tag("Excluded")),
     ))(input)
 }
@@ -1080,7 +1080,7 @@ fn block(input: &str) -> IResult<&str, Block> {
 fn block_check_mode(input: &str) -> IResult<&str, ()> {
     alt((
         value((), spaced_tag("Default")),
-        value((), preceded(spaced_tag("Unsafe"), unsafe_source)),
+        value((), preceded(spaced_tag("Unsafe"), parend(unsafe_source))),
     ))(input)
 }
 
@@ -1100,6 +1100,49 @@ fn stmt(input: &str) -> IResult<&str, ()> {
             ))),
         ),
     )(input)
+}
+
+fn stmt_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Let"), parend(local))),
+        value((), preceded(spaced_tag("Item"), parend(item))),
+        value((), preceded(spaced_tag("Expr"), parend(expr))),
+        value((), preceded(spaced_tag("Semi"), parend(expr))),
+        value((), spaced_tag("Empty")),
+    ))(input)
+}
+
+fn local(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Local"),
+            curlied(tuple((
+                struct_field("id", node_id),
+                struct_field("pat", pat),
+                struct_field("ty", option(ty)),
+                struct_field("kind", local_kind),
+                struct_field("span", span),
+                struct_field("colon_sp", option(span)),
+                struct_field("attrs", list(attribute)),
+                struct_field("tokens", tokens),
+            ))),
+        ),
+    )(input)
+}
+
+fn local_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Decl")),
+        value((), preceded(spaced_tag("Init"), parend(expr))),
+        value(
+            (),
+            preceded(
+                spaced_tag("InitElse"),
+                parend(separated_pair(expr, spaced_tag(","), block)),
+            ),
+        ),
+    ))(input)
 }
 
 #[derive(Debug, Clone)]
