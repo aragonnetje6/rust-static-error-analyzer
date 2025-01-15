@@ -372,7 +372,6 @@ fn ty_kind(input: &str) -> IResult<&str, ()> {
         value((), preceded(spaced_tag("Paren"), parend(ty))),
         value((), spaced_tag("Infer")),
         value((), spaced_tag("ImplicitSelf")),
-        value((), preceded(spaced_tag("MacCall"), parend(mac_call))),
         value((), spaced_tag("CVarArgs")),
         value(
             (),
@@ -382,7 +381,7 @@ fn ty_kind(input: &str) -> IResult<&str, ()> {
             ),
         ),
         value((), spaced_tag("Dummy")),
-    ))
+    ))(input)
 }
 
 fn anon_const(input: &str) -> IResult<&str, ()> {
@@ -412,6 +411,272 @@ fn expr(input: &str) -> IResult<&str, ()> {
             ))),
         ),
     )(input)
+}
+
+fn expr_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Array"), parend(list(expr)))),
+        value((), preceded(spaced_tag("ConstBlock"), parend(anon_const))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Call"),
+                parend(separated_pair(expr, spaced_tag(","), list(expr))),
+            ),
+        ),
+        value((), preceded(spaced_tag("MethodCall"), parend(method_call))),
+        value((), preceded(spaced_tag("Tup"), parend(list(expr)))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Binary"),
+                parend(tuple((
+                    bin_op,
+                    spaced_tag(","),
+                    expr,
+                    spaced_tag(","),
+                    expr,
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("UnOp"),
+                parend(separated_pair(un_op, spaced_tag(","), expr)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Lit"), parend(lit))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Cast"),
+                parend(separated_pair(expr, spaced_tag(","), ty)),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Type"),
+                parend(separated_pair(expr, spaced_tag(","), ty)),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Let"),
+                parend(tuple((pat, spaced_tag(","), expr, spaced_tag(","), span))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("If"),
+                parend(tuple((
+                    expr,
+                    spaced_tag(","),
+                    block,
+                    spaced_tag(","),
+                    option(expr),
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("While"),
+                parend(tuple((
+                    expr,
+                    spaced_tag(","),
+                    block,
+                    spaced_tag(","),
+                    option(label),
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("ForLoop"),
+                curlied(tuple((
+                    struct_field("pat", pat),
+                    struct_field("iter", expr),
+                    struct_field("body", block),
+                    struct_field("label", option(label)),
+                    struct_field("kind", for_loop_kind),
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Loop"),
+                parend(tuple((
+                    block,
+                    spaced_tag(","),
+                    option(label),
+                    spaced_tag(","),
+                    span,
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Match"),
+                parend(tuple((
+                    expr,
+                    spaced_tag(","),
+                    list(arm),
+                    spaced_tag(","),
+                    match_kind,
+                ))),
+            ),
+        ),
+        value((), preceded(spaced_tag("Closure"), parend(closure))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Block"),
+                parend(separated_pair(block, spaced_tag(","), option(label))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Gen"),
+                parend(tuple((
+                    capture_by,
+                    spaced_tag(","),
+                    block,
+                    spaced_tag(","),
+                    gen_block_kind,
+                    spaced_tag(","),
+                    span,
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Await"),
+                parend(separated_pair(expr, spaced_tag(","), span)),
+            ),
+        ),
+        value((), preceded(spaced_tag("TryBlock"), parend(block))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Assign"),
+                parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("AssignOp"),
+                parend(tuple((
+                    bin_op,
+                    spaced_tag(","),
+                    expr,
+                    spaced_tag(","),
+                    expr,
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Field"),
+                parend(separated_pair(expr, spaced_tag(","), ident)),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Index"),
+                parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Range"),
+                parend(tuple((
+                    option(expr),
+                    spaced_tag(","),
+                    option(expr),
+                    spaced_tag(","),
+                    range_limits,
+                ))),
+            ),
+        ),
+        value((), spaced_tag("Underscore")),
+        value(
+            (),
+            preceded(
+                spaced_tag("Path"),
+                parend(separated_pair(option(q_self), spaced_tag(","), path)),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("AddrOf"),
+                parend(tuple((
+                    borrow_kind,
+                    spaced_tag(","),
+                    mutability,
+                    spaced_tag(","),
+                    expr,
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Break"),
+                parend(separated_pair(option(label), spaced_tag(","), expr)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Continue"), parend(option(label)))),
+        value((), preceded(spaced_tag("InlineAsm"), parend(inline_asm))),
+        value(
+            (),
+            preceded(
+                spaced_tag("OffsetOf"),
+                parend(separated_pair(ty, spaced_tag(","), list(ident))),
+            ),
+        ),
+        value((), preceded(spaced_tag("Struct"), parend(struct_expr))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Repeat"),
+                parend(separated_pair(expr, spaced_tag(","), anon_const)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Paren"), parend(expr))),
+        value((), preceded(spaced_tag("Try"), parend(expr))),
+        value((), preceded(spaced_tag("Yield"), parend(option(expr)))),
+        value((), preceded(spaced_tag("Yeet"), parend(option(expr)))),
+        value((), preceded(spaced_tag("Become"), parend(expr))),
+        value((), preceded(spaced_tag("FormatArgs"), parend(format_args))),
+        value(
+            (),
+            preceded(
+                spaced_tag("UnsafeBinderCast"),
+                parend(tuple((
+                    unsafe_binder_cast_kind,
+                    spaced_tag(","),
+                    expr,
+                    spaced_tag(","),
+                    option(ty),
+                ))),
+            ),
+        ),
+        value((), spaced_tag("Dummy")),
+    ))(input)
 }
 
 #[derive(Debug, Clone)]
