@@ -1,11 +1,11 @@
 use nom::{
     branch::alt,
     bytes::complete::{escaped, is_not, tag},
-    character::complete::{self, multispace0, one_of},
+    character::complete,
     combinator::{map, value},
     error::ParseError,
     multi::separated_list0,
-    sequence::{delimited, pair, preceded, tuple},
+    sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult, Parser,
 };
 
@@ -14,7 +14,7 @@ where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    preceded(multispace0, parser)
+    preceded(complete::multispace0, parser)
 }
 
 fn spaced_tag<'a, E>(pat: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &'a str, E>
@@ -165,7 +165,10 @@ fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
             preceded(spaced_tag("Normal"), parend(normal_attr)),
         ),
         map(
-            preceded(spaced_tag("DocComment"), tuple((comment_kind, string))),
+            preceded(
+                spaced_tag("DocComment"),
+                tuple((comment_kind, spaced_string)),
+            ),
             |(kind, symbol)| AttrKind::DocComment(kind, symbol),
         ),
     ))
@@ -235,6 +238,182 @@ fn path_segment(input: &str) -> IResult<&str, ()> {
     )(input)
 }
 
+fn generic_args(input: &str) -> IResult<&str, ()> {
+    alt((
+        value(
+            (),
+            preceded(spaced_tag("AngleBracketed"), parend(angle_bracketed_args)),
+        ),
+        value(
+            (),
+            preceded(spaced_tag("Parenthesized"), parend(parenthesized_args)),
+        ),
+        value(
+            (),
+            preceded(spaced_tag("ParenthesizedElided"), parend(span)),
+        ),
+    ))(input)
+}
+
+fn angle_bracketed_args(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("AngleBracketedArgs"),
+            curlied(tuple((
+                struct_field("span", span),
+                struct_field("args", list(angle_bracketed_arg)),
+            ))),
+        ),
+    )(input)
+}
+
+fn angle_bracketed_arg(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Arg"), parend(generic_arg))),
+        value(
+            (),
+            preceded(spaced_tag("Constraint"), parend(assoc_item_constraint)),
+        ),
+    ))(input)
+}
+
+fn generic_arg(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Lifetime"), parend(lifetime))),
+        value((), preceded(spaced_tag("Type"), parend(ty))),
+        value((), preceded(spaced_tag("Const"), parend(anon_const))),
+    ))(input)
+}
+
+fn lifetime(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        separated_pair(
+            complete::u32,
+            spaced_tag(":"),
+            pair(spaced_tag("'"), complete::none_of(")")),
+        ),
+    )(input)
+}
+
+fn ty(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Ty"),
+            curlied(tuple((
+                struct_field("id", node_id),
+                struct_field("kind", ty_kind),
+                struct_field("span", span),
+                struct_field("tokens", tokens),
+            ))),
+        ),
+    )(input)
+}
+
+fn ty_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Slice"), parend(ty))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Array"),
+                parend(separated_pair(ty, spaced_tag(","), anon_const)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Ptr"), parend(mut_ty))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Ref"),
+                parend(separated_pair(option(lifetime), spaced_tag(","), mut_ty)),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("PinnedRef"),
+                parend(separated_pair(option(lifetime), spaced_tag(","), mut_ty)),
+            ),
+        ),
+        value((), preceded(spaced_tag("BareFn"), parend(bare_fn_ty))),
+        value(
+            (),
+            preceded(spaced_tag("UnsafeBinder"), parend(unsafe_binder_ty)),
+        ),
+        value((), spaced_tag("Never")),
+        value((), preceded(spaced_tag("Tup"), parend(list(ty)))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Path"),
+                parend(separated_pair(option(q_self), spaced_tag(","), path)),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("TraitObject"),
+                parend(separated_pair(
+                    generic_bounds,
+                    spaced_tag(","),
+                    trait_object_syntax,
+                )),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("ImplTrait"),
+                parend(separated_pair(node_id, spaced_tag(","), generic_bounds)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Paren"), parend(ty))),
+        value((), spaced_tag("Infer")),
+        value((), spaced_tag("ImplicitSelf")),
+        value((), preceded(spaced_tag("MacCall"), parend(mac_call))),
+        value((), spaced_tag("CVarArgs")),
+        value(
+            (),
+            preceded(
+                spaced_tag("Pat"),
+                parend(separated_pair(ty, spaced_tag(","), pat)),
+            ),
+        ),
+        value((), spaced_tag("Dummy")),
+    ))
+}
+
+fn anon_const(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("AnonConst"),
+            curlied(tuple((
+                struct_field("id", node_id),
+                struct_field("value", expr),
+            ))),
+        ),
+    )(input)
+}
+
+fn expr(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Expr"),
+            curlied(tuple((
+                struct_field("id", node_id),
+                struct_field("kind", expr_kind),
+                struct_field("span", span),
+                struct_field("attrs", list(attribute)),
+                struct_field("tokens", tokens),
+            ))),
+        ),
+    )(input)
+}
+
 #[derive(Debug, Clone)]
 enum CommentKind {
     Line,
@@ -289,7 +468,7 @@ struct Span<'a>(&'a str);
 fn spaced_string(input: &str) -> IResult<&str, &str> {
     spaced(delimited(
         tag("\""),
-        escaped(is_not("\"'"), '\\', one_of("\"'\\")),
+        escaped(is_not("\"'"), '\\', complete::one_of("\"'\\")),
         tag("\""),
     ))(input)
 }
