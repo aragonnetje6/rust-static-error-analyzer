@@ -1636,6 +1636,78 @@ enum ItemKind<'a> {
     Impl(Impl<'a>),
 }
 
+fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
+    alt((
+        map(
+            alt((
+                map(preceded(spaced_tag("Fn"), parend(parse_fn)), ItemKind::Fn),
+                map(
+                    preceded(spaced_tag("Mod"), parend(parse_mod)),
+                    ItemKind::Mod,
+                ),
+                map(
+                    preceded(spaced_tag("Trait"), parend(parse_trait)),
+                    ItemKind::Trait,
+                ),
+                map(
+                    preceded(spaced_tag("Impl"), parend(parse_impl)),
+                    ItemKind::Impl,
+                ),
+            )),
+            Some,
+        ),
+        map(
+            alt((
+                value(
+                    (),
+                    preceded(spaced_tag("ExternCrate"), parend(option(spaced_string))),
+                ),
+                value((), preceded(spaced_tag("Use"), parend(use_tree))),
+                value((), preceded(spaced_tag("Static"), parend(static_item))),
+                value((), preceded(spaced_tag("Const"), parend(const_item))),
+                value((), preceded(spaced_tag("ForeignMod"), parend(foreign_mod))),
+                value((), preceded(spaced_tag("GlobalAsm"), parend(inline_asm))),
+                value((), preceded(spaced_tag("TyAlias"), parend(ty_alias))),
+                value(
+                    (),
+                    preceded(
+                        spaced_tag("Enum"),
+                        parend(separated_pair(enum_def, spaced_tag(","), generics)),
+                    ),
+                ),
+                value(
+                    (),
+                    preceded(
+                        spaced_tag("Struct"),
+                        parend(separated_pair(variant_data, spaced_tag(","), generics)),
+                    ),
+                ),
+                value(
+                    (),
+                    preceded(
+                        spaced_tag("Union"),
+                        parend(separated_pair(variant_data, spaced_tag(","), generics)),
+                    ),
+                ),
+                value(
+                    (),
+                    preceded(
+                        spaced_tag("TraitAlias"),
+                        parend(separated_pair(
+                            generics,
+                            spaced_tag(","),
+                            list(generic_bound),
+                        )),
+                    ),
+                ),
+                value((), preceded(spaced_tag("MacroDef"), parend(macro_def))),
+                value((), preceded(spaced_tag("Delegation"), parend(delegation))),
+            )),
+            |_| None,
+        ),
+    ))(input)
+}
+
 #[derive(Debug, Clone)]
 struct Fn<'a> {
     body: Option<Block<'a>>,
