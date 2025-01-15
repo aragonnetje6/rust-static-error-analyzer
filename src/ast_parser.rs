@@ -661,7 +661,10 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
         value((), preceded(spaced_tag("Yield"), parend(option(expr)))),
         value((), preceded(spaced_tag("Yeet"), parend(option(expr)))),
         value((), preceded(spaced_tag("Become"), parend(expr))),
-        value((), preceded(spaced_tag("FormatArgs"), parend(format_args))),
+        value(
+            (),
+            preceded(spaced_tag("FormatArgs"), parend(parse_format_args)),
+        ),
         value(
             (),
             preceded(
@@ -867,6 +870,87 @@ fn pat_kind(input: &str) -> IResult<&str, ()> {
         ),
         value((), preceded(spaced_tag("Paren"), parend(pat))),
     ))(input)
+}
+
+fn binding_mode(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("BindingMode"),
+            parend(separated_pair(by_ref, spaced_tag(","), mutability)),
+        ),
+    )(input)
+}
+
+fn by_ref(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Yes"), parend(mutability))),
+        value((), spaced_tag("No")),
+    ))(input)
+}
+
+fn mutability(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Not"), spaced_tag("Mut")))(input)
+}
+
+fn q_self(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("QSelf"),
+            curlied(tuple((
+                struct_field("ty", ty),
+                struct_field("path_span", span),
+                struct_field("position", complete::u64),
+            ))),
+        ),
+    )(input)
+}
+
+fn pat_field(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("PatField"),
+            curlied(tuple((
+                struct_field("ident", ident),
+                struct_field("pat", pat),
+                struct_field("is_shorthand", parse_bool),
+                struct_field("attrs", list(attribute)),
+                struct_field("id", node_id),
+                struct_field("span", span),
+                struct_field("is_placeholder", parse_bool),
+            ))),
+        ),
+    )(input)
+}
+
+fn pat_fields_rest(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Rest"), spaced_tag("None")))(input)
+}
+
+fn spanned_range_end(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Spanned"),
+            curlied(tuple((
+                struct_field("node", range_end),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn range_end(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Included"), range_syntax)),
+        value((), spaced_tag("Excluded")),
+    ))(input)
+}
+
+fn range_syntax(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("DotDotDot"), spaced_tag("DotDotEq")))(input)
 }
 
 #[derive(Debug, Clone)]
