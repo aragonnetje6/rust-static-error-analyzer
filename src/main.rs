@@ -3,6 +3,7 @@
 #![allow(clippy::cast_precision_loss)]
 
 mod analysis;
+mod ast_parser;
 mod compiler;
 mod graph;
 
