@@ -4,7 +4,7 @@ use nom::{
     character::complete,
     combinator::{map, value},
     error::ParseError,
-    multi::separated_list0,
+    multi::{many0, separated_list0},
     sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult, Parser,
 };
@@ -67,6 +67,18 @@ where
     squared(separated_list0(spaced_tag(","), item))
 }
 
+fn hashmap<'a, O1, O2, E, P1, P2>(
+    key: P1,
+    value: P2,
+) -> impl FnMut(&'a str) -> IResult<&'a str, Vec<(O1, O2)>, E>
+where
+    E: ParseError<&'a str>,
+    P1: Parser<&'a str, O1, E>,
+    P2: Parser<&'a str, O2, E>,
+{
+    curlied(many0(separated_pair(key, spaced_tag(":"), value)))
+}
+
 fn option<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Option<O>, E>
 where
     E: ParseError<&'a str>,
@@ -75,6 +87,21 @@ where
     alt((
         map(spaced_tag("None"), |_| None),
         map(preceded(spaced_tag("Some"), parend(item)), Some),
+    ))
+}
+
+fn result<'a, O1, O2, E, P1, P2>(
+    ok: P1,
+    err: P2,
+) -> impl FnMut(&'a str) -> IResult<&'a str, Result<O1, O2>, E>
+where
+    E: ParseError<&'a str>,
+    P1: Parser<&'a str, O1, E>,
+    P2: Parser<&'a str, O2, E>,
+{
+    alt((
+        map(preceded(spaced_tag("Ok"), parend(ok)), Ok),
+        map(preceded(spaced_tag("Err"), parend(err)), Err),
     ))
 }
 
@@ -563,122 +590,290 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
                 parend(separated_pair(expr, spaced_tag(","), span)),
             ),
         ),
-        value((), preceded(spaced_tag("TryBlock"), parend(block))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Assign"),
-                parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
+        alt((
+            value((), preceded(spaced_tag("TryBlock"), parend(block))),
+            value(
+                (),
+                preceded(
+                    spaced_tag("Assign"),
+                    parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
+                ),
             ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("AssignOp"),
-                parend(tuple((
-                    bin_op,
-                    spaced_tag(","),
-                    expr,
-                    spaced_tag(","),
-                    expr,
-                ))),
+            value(
+                (),
+                preceded(
+                    spaced_tag("AssignOp"),
+                    parend(tuple((
+                        bin_op,
+                        spaced_tag(","),
+                        expr,
+                        spaced_tag(","),
+                        expr,
+                    ))),
+                ),
             ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Field"),
-                parend(separated_pair(expr, spaced_tag(","), ident)),
+            value(
+                (),
+                preceded(
+                    spaced_tag("Field"),
+                    parend(separated_pair(expr, spaced_tag(","), ident)),
+                ),
             ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Index"),
-                parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
+            value(
+                (),
+                preceded(
+                    spaced_tag("Index"),
+                    parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
+                ),
             ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Range"),
-                parend(tuple((
-                    option(expr),
-                    spaced_tag(","),
-                    option(expr),
-                    spaced_tag(","),
-                    range_limits,
-                ))),
+            value(
+                (),
+                preceded(
+                    spaced_tag("Range"),
+                    parend(tuple((
+                        option(expr),
+                        spaced_tag(","),
+                        option(expr),
+                        spaced_tag(","),
+                        range_limits,
+                    ))),
+                ),
             ),
-        ),
-        value((), spaced_tag("Underscore")),
-        value(
-            (),
-            preceded(
-                spaced_tag("Path"),
-                parend(separated_pair(option(q_self), spaced_tag(","), path)),
+            value((), spaced_tag("Underscore")),
+            value(
+                (),
+                preceded(
+                    spaced_tag("Path"),
+                    parend(separated_pair(option(q_self), spaced_tag(","), path)),
+                ),
             ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("AddrOf"),
-                parend(tuple((
-                    borrow_kind,
-                    spaced_tag(","),
-                    mutability,
-                    spaced_tag(","),
-                    expr,
-                ))),
+            value(
+                (),
+                preceded(
+                    spaced_tag("AddrOf"),
+                    parend(tuple((
+                        borrow_kind,
+                        spaced_tag(","),
+                        mutability,
+                        spaced_tag(","),
+                        expr,
+                    ))),
+                ),
             ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Break"),
-                parend(separated_pair(option(label), spaced_tag(","), expr)),
+            value(
+                (),
+                preceded(
+                    spaced_tag("Break"),
+                    parend(separated_pair(option(label), spaced_tag(","), expr)),
+                ),
             ),
-        ),
-        value((), preceded(spaced_tag("Continue"), parend(option(label)))),
-        value((), preceded(spaced_tag("InlineAsm"), parend(inline_asm))),
-        value(
-            (),
-            preceded(
-                spaced_tag("OffsetOf"),
-                parend(separated_pair(ty, spaced_tag(","), list(ident))),
+            value((), preceded(spaced_tag("Continue"), parend(option(label)))),
+            value((), preceded(spaced_tag("InlineAsm"), parend(inline_asm))),
+            value(
+                (),
+                preceded(
+                    spaced_tag("OffsetOf"),
+                    parend(separated_pair(ty, spaced_tag(","), list(ident))),
+                ),
             ),
-        ),
-        value((), preceded(spaced_tag("Struct"), parend(struct_expr))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Repeat"),
-                parend(separated_pair(expr, spaced_tag(","), anon_const)),
+            value((), preceded(spaced_tag("Struct"), parend(struct_expr))),
+            value(
+                (),
+                preceded(
+                    spaced_tag("Repeat"),
+                    parend(separated_pair(expr, spaced_tag(","), anon_const)),
+                ),
             ),
+            value((), preceded(spaced_tag("Paren"), parend(expr))),
+            value((), preceded(spaced_tag("Try"), parend(expr))),
+            value((), preceded(spaced_tag("Yield"), parend(option(expr)))),
+            value((), preceded(spaced_tag("Yeet"), parend(option(expr)))),
+            value((), preceded(spaced_tag("Become"), parend(expr))),
+            alt((
+                value(
+                    (),
+                    preceded(spaced_tag("FormatArgs"), parend(parse_format_args)),
+                ),
+                value(
+                    (),
+                    preceded(
+                        spaced_tag("UnsafeBinderCast"),
+                        parend(tuple((
+                            unsafe_binder_cast_kind,
+                            spaced_tag(","),
+                            expr,
+                            spaced_tag(","),
+                            option(ty),
+                        ))),
+                    ),
+                ),
+                value((), spaced_tag("Dummy")),
+            )),
+        )),
+    ))(input)
+}
+
+fn parse_format_args(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FormatArgs"),
+            curlied(tuple((
+                struct_field("span", span),
+                struct_field("template", list(format_args_piece)),
+                struct_field("arguments", format_arguments),
+                struct_field(
+                    "uncooked_fmt_str",
+                    parend(separated_pair(lit_kind, spaced_tag(","), spaced_string)),
+                ),
+            ))),
         ),
-        value((), preceded(spaced_tag("Paren"), parend(expr))),
-        value((), preceded(spaced_tag("Try"), parend(expr))),
-        value((), preceded(spaced_tag("Yield"), parend(option(expr)))),
-        value((), preceded(spaced_tag("Yeet"), parend(option(expr)))),
-        value((), preceded(spaced_tag("Become"), parend(expr))),
+    )(input)
+}
+
+fn format_arguments(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FormatArguments"),
+            curlied(tuple((
+                struct_field("arguments", list(format_argument)),
+                struct_field("num_unnamed_args", complete::u64),
+                struct_field("num_explicit_args", complete::u64),
+                struct_field("names", hashmap(spaced_string, complete::u64)),
+                struct_field(
+                    "uncooked_fmt_str",
+                    parend(separated_pair(lit_kind, spaced_tag(","), spaced_string)),
+                ),
+            ))),
+        ),
+    )(input)
+}
+
+fn format_argument(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FormatArgument"),
+            curlied(tuple((
+                struct_field("kind", format_argument_kind),
+                struct_field("expr", expr),
+            ))),
+        ),
+    )(input)
+}
+
+fn format_argument_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Normal")),
+        value((), preceded(spaced_tag("Named"), parend(ident))),
+        value((), preceded(spaced_tag("captured"), parend(ident))),
+    ))(input)
+}
+
+fn format_args_piece(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Literal"), parend(spaced_string))),
         value(
             (),
-            preceded(spaced_tag("FormatArgs"), parend(parse_format_args)),
+            preceded(spaced_tag("Placeholder"), parend(format_placeholder)),
         ),
+    ))(input)
+}
+
+fn format_placeholder(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FormatPlaceholder"),
+            curlied(tuple((
+                struct_field("argument", format_arg_position),
+                struct_field("span", span),
+                struct_field("format_trait", format_trait),
+                struct_field("format_options", format_options),
+            ))),
+        ),
+    )(input)
+}
+
+fn format_options(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FormatOptions"),
+            curlied(tuple((
+                struct_field("width", option(format_count)),
+                struct_field("precision", option(format_count)),
+                struct_field("alignment", option(format_alignment)),
+                struct_field("fill", option(complete::anychar)),
+                struct_field("sign", option(format_sign)),
+                struct_field("alternate", parse_bool),
+                struct_field("zero_pad", parse_bool),
+                struct_field("debug_hex", option(format_debug_hex)),
+            ))),
+        ),
+    )(input)
+}
+
+fn format_count(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Literal"), parend(complete::u64))),
         value(
             (),
-            preceded(
-                spaced_tag("UnsafeBinderCast"),
-                parend(tuple((
-                    unsafe_binder_cast_kind,
-                    spaced_tag(","),
-                    expr,
-                    spaced_tag(","),
-                    option(ty),
-                ))),
-            ),
+            preceded(spaced_tag("Argument"), parend(format_arg_position)),
         ),
-        value((), spaced_tag("Dummy")),
+    ))(input)
+}
+
+fn format_debug_hex(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Lower"), spaced_tag("Upper")))(input)
+}
+
+fn format_sign(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Plus"), spaced_tag("Minus")))(input)
+}
+
+fn format_alignment(input: &str) -> IResult<&str, &str> {
+    alt((
+        spaced_tag("Left"),
+        spaced_tag("Right"),
+        spaced_tag("Center"),
+    ))(input)
+}
+
+fn format_trait(input: &str) -> IResult<&str, &str> {
+    alt((
+        spaced_tag("Display"),
+        spaced_tag("Debug"),
+        spaced_tag("LowerExp"),
+        spaced_tag("UpperExp"),
+        spaced_tag("Octal"),
+        spaced_tag("Pointer"),
+        spaced_tag("Binary"),
+        spaced_tag("LowerHex"),
+        spaced_tag("UpperHex"),
+    ))(input)
+}
+
+fn format_arg_position(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FormatArgPosition"),
+            curlied(tuple((
+                struct_field("index", result(complete::u64, complete::u64)),
+                struct_field("kind", format_arg_position_kind),
+                struct_field("span", option(span)),
+            ))),
+        ),
+    )(input)
+}
+
+fn format_arg_position_kind(input: &str) -> IResult<&str, &str> {
+    alt((
+        spaced_tag("Implicit"),
+        spaced_tag("Number"),
+        spaced_tag("Named"),
     ))(input)
 }
 
@@ -798,7 +993,7 @@ fn param(input: &str) -> IResult<&str, ()> {
                 struct_field("pat", pat),
                 struct_field("id", node_id),
                 struct_field("span", span),
-                struct_field("is_placeholder", bool),
+                struct_field("is_placeholder", parse_bool),
             ))),
         ),
     )(input)
