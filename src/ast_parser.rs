@@ -181,7 +181,7 @@ fn normal_attr(input: &str) -> IResult<&str, ()> {
             spaced_tag("NormalAttr"),
             curlied(tuple((
                 struct_field("item", attr_item),
-                struct_field("tokens", option(tokens)),
+                struct_field("tokens", tokens),
             ))),
         ),
     )(input)
@@ -196,7 +196,7 @@ fn attr_item(input: &str) -> IResult<&str, ()> {
                 struct_field("safety", safety),
                 struct_field("path", path),
                 struct_field("args", attr_args),
-                struct_field("tokens", option(tokens)),
+                struct_field("tokens", tokens),
             ))),
         ),
     )(input)
@@ -218,7 +218,7 @@ fn path(input: &str) -> IResult<&str, ()> {
             curlied(tuple((
                 struct_field("span", span),
                 struct_field("segments", list(path_segment)),
-                struct_field("tokens", option(tokens)),
+                struct_field("tokens", tokens),
             ))),
         ),
     )(input)
@@ -677,6 +677,106 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
         ),
         value((), spaced_tag("Dummy")),
     ))(input)
+}
+
+fn method_call(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("MethodCall"),
+            curlied(tuple((
+                struct_field("seg", path_segment),
+                struct_field("receiver", expr),
+                struct_field("args", list(expr)),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn bin_op(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Spanned"),
+            curlied(tuple((
+                struct_field("node", bin_op_kind),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn bin_op_kind(input: &str) -> IResult<&str, &str> {
+    alt((
+        spaced_tag("Add"),
+        spaced_tag("Sub"),
+        spaced_tag("Mul"),
+        spaced_tag("Div"),
+        spaced_tag("Rem"),
+        spaced_tag("And"),
+        spaced_tag("Or"),
+        spaced_tag("BitXor"),
+        spaced_tag("BitAnd"),
+        spaced_tag("BitOr"),
+        spaced_tag("Shl"),
+        spaced_tag("Shr"),
+        spaced_tag("Eq"),
+        spaced_tag("Lt"),
+        spaced_tag("Le"),
+        spaced_tag("Ne"),
+        spaced_tag("Ge"),
+        spaced_tag("Gt"),
+    ))(input)
+}
+
+fn un_op(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Deref"), spaced_tag("Not"), spaced_tag("Neg")))(input)
+}
+
+fn lit(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Lit"),
+            curlied(tuple((
+                struct_field("kind", lit_kind),
+                struct_field("symbol", spaced_string),
+                struct_field("suffix", option(spaced_string)),
+            ))),
+        ),
+    )(input)
+}
+
+fn lit_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Bool")),
+        value((), spaced_tag("Byte")),
+        value((), spaced_tag("Char")),
+        value((), spaced_tag("Integer")),
+        value((), spaced_tag("Float")),
+        value((), spaced_tag("Str")),
+        value((), preceded(spaced_tag("StrRaw"), parend(complete::u8))),
+        value((), spaced_tag("ByteStr")),
+        value((), preceded(spaced_tag("ByteStrRaw"), parend(complete::u8))),
+        value((), spaced_tag("CStr")),
+        value((), preceded(spaced_tag("CStrRaw"), parend(complete::u8))),
+    ))(input)
+}
+
+fn pat(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Pat"),
+            curlied(tuple((
+                struct_field("id", node_id),
+                struct_field("kind", pat_kind),
+                struct_field("span", span),
+                struct_field("tokens", tokens),
+            ))),
+        ),
+    )(input)
 }
 
 #[derive(Debug, Clone)]
