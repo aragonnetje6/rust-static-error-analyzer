@@ -1713,6 +1713,179 @@ struct Fn<'a> {
     body: Option<Block<'a>>,
 }
 
+impl<'a> Fn<'a> {
+    fn new(body: Option<Block<'a>>) -> Self {
+        Self { body }
+    }
+}
+
+fn parse_fn(input: &str) -> IResult<&str, Fn> {
+    map(
+        preceded(
+            spaced_tag("Fn"),
+            curlied(tuple((
+                struct_field("defaultness", defaultness),
+                struct_field("generics", generics),
+                struct_field("sig", fn_sig),
+                struct_field("body", option(block)),
+            ))),
+        ),
+        |(_, _, _, body)| Fn::new(body),
+    )(input)
+}
+
+fn fn_sig(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FnSig"),
+            curlied(tuple((
+                struct_field("header", fn_header),
+                struct_field("decl", fn_decl),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn fn_header(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FnHeader"),
+            curlied(tuple((
+                struct_field("safety", safety),
+                struct_field("coroutine_kind", option(coroutine_kind)),
+                struct_field("constness", parse_const),
+                struct_field("ext", parse_extern),
+            ))),
+        ),
+    )(input)
+}
+
+fn parse_extern(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("None")),
+        value((), preceded(spaced_tag("Implicit"), parend(span))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Explicit"),
+                parend(separated_pair(str_lit, spaced_tag(","), span)),
+            ),
+        ),
+    ))(input)
+}
+
+fn str_lit(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("StrLit"),
+            curlied(tuple((
+                struct_field("symbol", spaced_string),
+                struct_field("suffix", option(spaced_string)),
+                struct_field("symbol_unescaped", spaced_string),
+                struct_field("style", str_style),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn str_style(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Cooked")),
+        value((), preceded(spaced_tag("Raw"), parend(complete::u8))),
+    ))(input)
+}
+
+fn generics(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Generics"),
+            curlied(tuple((
+                struct_field("params", list(generic_param)),
+                struct_field("where_clause", where_clause),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn where_clause(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("WhereClause"),
+            curlied(tuple((
+                struct_field("has_where_token", parse_bool),
+                struct_field("predicates", list(where_predicate)),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn where_predicate(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("WherePredicate"),
+            curlied(tuple((
+                struct_field("kind", where_predicate_kind),
+                struct_field("id", node_id),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn where_predicate_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        preceded(spaced_tag("BoundPredicate"), parend(where_bound_predicate)),
+        preceded(
+            spaced_tag("RegionPredicate"),
+            parend(where_region_predicate),
+        ),
+    ))(input)
+}
+
+fn where_bound_predicate(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("WhereBoundPredicate"),
+            curlied(tuple((
+                struct_field("bound_generic_params", list(generic_param)),
+                struct_field("bounded_ty", ty),
+                struct_field("bounds", list(generic_bound)),
+            ))),
+        ),
+    )(input)
+}
+
+fn where_region_predicate(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("WhereRegionPredicate"),
+            curlied(tuple((
+                struct_field("lifetime", lifetime),
+                struct_field("bounds", list(generic_bound)),
+            ))),
+        ),
+    )(input)
+}
+
+fn defaultness(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Default"), parend(span))),
+        value((), spaced_tag("Final")),
+    ))(input)
+}
+
 #[derive(Debug, Clone)]
 struct Block<'a> {
     span: Span<'a>,
