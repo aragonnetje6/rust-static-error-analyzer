@@ -702,6 +702,102 @@ fn closure(input: &str) -> IResult<&str, ()> {
     )(input)
 }
 
+fn fn_decl(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FnDecl"),
+            curlied(tuple((
+                struct_field("inputs", list(param)),
+                struct_field("output", fn_ret_ty),
+            ))),
+        ),
+    )(input)
+}
+
+fn fn_ret_ty(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Default"), parend(span))),
+        value((), preceded(spaced_tag("Ty"), parend(ty))),
+    ))(input)
+}
+
+fn param(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Param"),
+            curlied(tuple((
+                struct_field("attrs", list(attribute)),
+                struct_field("ty", ty),
+                struct_field("pat", pat),
+                struct_field("id", node_id),
+                struct_field("span", span),
+                struct_field("is_placeholder", bool),
+            ))),
+        ),
+    )(input)
+}
+
+fn movability(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Static"), spaced_tag("Movable")))(input)
+}
+
+fn coroutine_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value(
+            (),
+            preceded(
+                spaced_tag("Async"),
+                curlied(tuple((
+                    struct_field("span", span),
+                    struct_field("closure_id", node_id),
+                    struct_field("return_impl_trait_id", node_id),
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Gen"),
+                curlied(tuple((
+                    struct_field("span", span),
+                    struct_field("closure_id", node_id),
+                    struct_field("return_impl_trait_id", node_id),
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("AsyncGen"),
+                curlied(tuple((
+                    struct_field("span", span),
+                    struct_field("closure_id", node_id),
+                    struct_field("return_impl_trait_id", node_id),
+                ))),
+            ),
+        ),
+    ))(input)
+}
+
+fn parse_const(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("No")),
+        value((), preceded(spaced_tag("Yes"), parend(span))),
+    ))(input)
+}
+
+fn capture_by(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Ref")),
+        value(
+            (),
+            preceded(spaced_tag("Value"), curlied(struct_field("move_kw", span))),
+        ),
+    ))(input)
+}
+
 fn closure_binder(input: &str) -> IResult<&str, ()> {
     alt((
         value((), spaced_tag("NotPresent")),
@@ -734,6 +830,30 @@ fn generic_param(input: &str) -> IResult<&str, ()> {
             ))),
         ),
     )(input)
+}
+
+fn generic_param_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Lifetime")),
+        value(
+            (),
+            preceded(
+                spaced_tag("Type"),
+                curlied(struct_field("default", option(ty))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Type"),
+                curlied(tuple((
+                    struct_field("ty", ty),
+                    struct_field("kw_span", span),
+                    struct_field("default", option(anon_const)),
+                ))),
+            ),
+        ),
+    ))(input)
 }
 
 fn generic_bound(input: &str) -> IResult<&str, ()> {
