@@ -1054,6 +1054,54 @@ struct Block<'a> {
     span: Span<'a>,
 }
 
+impl<'a> Block<'a> {
+    fn new(span: Span<'a>) -> Self {
+        Self { span }
+    }
+}
+
+fn block(input: &str) -> IResult<&str, Block> {
+    map(
+        preceded(
+            spaced_tag("Block"),
+            curlied(tuple((
+                struct_field("stmts", list(stmt)),
+                struct_field("id", node_id),
+                struct_field("rules", block_check_mode),
+                struct_field("span", span),
+                struct_field("tokens", tokens),
+                struct_field("could_be_bare_literal", parse_bool),
+            ))),
+        ),
+        |(_, _, _, span, _, _)| Block::new(span),
+    )(input)
+}
+
+fn block_check_mode(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Default")),
+        value((), preceded(spaced_tag("Unsafe"), unsafe_source)),
+    ))(input)
+}
+
+fn unsafe_source(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("CompilerGenerated"), spaced_tag("UserProvided")))(input)
+}
+
+fn stmt(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Stmt"),
+            curlied(tuple((
+                struct_field("id", node_id),
+                struct_field("kind", stmt_kind),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
 #[derive(Debug, Clone)]
 struct Mod<'a> {
     items: Vec<Item<'a>>,
