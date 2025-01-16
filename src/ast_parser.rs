@@ -1719,6 +1719,21 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
     ))(input)
 }
 
+fn static_item(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("StaticItem"),
+            curlied(tuple((
+                struct_field("ty", ty),
+                struct_field("safety", safety),
+                struct_field("mutability", mutability),
+                struct_field("expr", option(expr)),
+            ))),
+        ),
+    )(input)
+}
+
 fn use_tree(input: &str) -> IResult<&str, ()> {
     value(
         (),
