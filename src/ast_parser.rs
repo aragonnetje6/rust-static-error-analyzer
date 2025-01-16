@@ -1719,6 +1719,78 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
     ))(input)
 }
 
+fn enum_def(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("EnumDef"),
+            curlied(tuple((struct_field("variants", list(variant)),))),
+        ),
+    )(input)
+}
+
+fn variant(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Variant"),
+            curlied(tuple((
+                struct_field("attrs", list(attribute)),
+                struct_field("id", node_id),
+                struct_field("span", span),
+                struct_field("vis", visibility),
+                struct_field("ident", ident),
+                struct_field("data", variant_data),
+                struct_field("disr_expr", option(anon_const)),
+                struct_field("is_placeholder", parse_bool),
+            ))),
+        ),
+    )(input)
+}
+
+fn variant_data(input: &str) -> IResult<&str, ()> {
+    alt((
+        value(
+            (),
+            preceded(
+                spaced_tag("Struct"),
+                curlied(tuple((
+                    struct_field("fields", list(field_def)),
+                    struct_field("recovered", spaced_tag("No")),
+                ))),
+            ),
+        ),
+        value(
+            (),
+            preceded(
+                spaced_tag("Tuple"),
+                parend(separated_pair(list(field_def), spaced_tag(","), node_id)),
+            ),
+        ),
+        value((), preceded(spaced_tag("Unit"), parend(node_id))),
+    ))(input)
+}
+
+fn field_def(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("FieldDef"),
+            curlied(tuple((
+                struct_field("attrs", list(attribute)),
+                struct_field("id", node_id),
+                struct_field("span", span),
+                struct_field("vis", visibility),
+                struct_field("safety", safety),
+                struct_field("ident", ident),
+                struct_field("ty", ty),
+                struct_field("default", option(anon_const)),
+                struct_field("is_placeholder", parse_bool),
+            ))),
+        ),
+    )(input)
+}
+
 fn foreign_item_kind(input: &str) -> IResult<&str, ()> {
     alt((
         value((), preceded(spaced_tag("Static"), parend(static_item))),
