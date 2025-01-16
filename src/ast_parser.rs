@@ -2178,3 +2178,35 @@ fn ty_alias_where_clause(input: &str) -> IResult<&str, ()> {
 struct Impl<'a> {
     items: Vec<AssocItem<'a>>,
 }
+
+impl<'a> Impl<'a> {
+    fn new(items: Vec<AssocItem<'a>>) -> Self {
+        Self { items }
+    }
+}
+
+fn parse_impl(input: &str) -> IResult<&str, Impl> {
+    map(
+        preceded(
+            spaced_tag("Impl"),
+            curlied(tuple((
+                struct_field("defaultness", defaultness),
+                struct_field("safety", safety),
+                struct_field("generics", generics),
+                struct_field("constness", parse_const),
+                struct_field("polarity", impl_polarity),
+                struct_field("of_trait", option(trait_ref)),
+                struct_field("self_ty", ty),
+                struct_field("items", list(assoc_item)),
+            ))),
+        ),
+        |(_, _, _, _, _, _, _, items)| Impl::new(items),
+    )(input)
+}
+
+fn impl_polarity(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Positive")),
+        value((), preceded(spaced_tag("Negative"), parend(span))),
+    ))(input)
+}
