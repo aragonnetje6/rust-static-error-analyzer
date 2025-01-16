@@ -1719,6 +1719,117 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
     ))(input)
 }
 
+fn macro_def(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("MacroDef"),
+            curlied(tuple((
+                struct_field("body", delim_args),
+                struct_field("macro_rules", parse_bool),
+            ))),
+        ),
+    )(input)
+}
+
+fn delim_args(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("DelimArgs"),
+            curlied(tuple((
+                struct_field("dspan", delim_span),
+                struct_field("delim", delimiter),
+                struct_field("tokens", token_stream),
+            ))),
+        ),
+    )(input)
+}
+
+fn delim_span(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("DelimSpan"),
+            curlied(tuple((
+                struct_field("open", span),
+                struct_field("close", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn delimiter(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), spaced_tag("Parenthesis")),
+        value((), spaced_tag("Brace")),
+        value((), spaced_tag("Bracket")),
+        preceded(spaced_tag("Invisible"), parend(invisible_origin)),
+    ))(input)
+}
+
+fn invisible_origin(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("MetaVar"), parend(meta_var_kind))),
+        value((), spaced_tag("ProcMacro")),
+        value((), spaced_tag("FlattenToken")),
+    ))(input)
+}
+
+fn meta_var_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Pat"), parend(nt_pat_kind))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Expr"),
+                curlied(tuple((
+                    struct_field("kind", nt_expr_kind),
+                    struct_field("can_begin_literal_maybe_minus", parse_bool),
+                    struct_field("can_begin_string_literal", parse_bool),
+                ))),
+            ),
+        ),
+        value((), spaced_tag("Item")),
+        value((), spaced_tag("Block")),
+        value((), spaced_tag("Stmt")),
+        value((), spaced_tag("Ty")),
+        value((), spaced_tag("Ident")),
+        value((), spaced_tag("Lifetime")),
+        value((), spaced_tag("Literal")),
+        value((), spaced_tag("Meta")),
+        value((), spaced_tag("Path")),
+        value((), spaced_tag("Vis")),
+        value((), spaced_tag("TT")),
+    ))(input)
+}
+
+fn nt_expr_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value(
+            (),
+            preceded(
+                spaced_tag("Expr2021"),
+                curlied(struct_field("inferred", parse_bool)),
+            ),
+        ),
+        value((), spaced_tag("Expr")),
+    ))(input)
+}
+
+fn nt_pat_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value(
+            (),
+            preceded(
+                spaced_tag("PatParam"),
+                curlied(struct_field("inferred", parse_bool)),
+            ),
+        ),
+        value((), spaced_tag("PatWithOr")),
+    ))(input)
+}
+
 fn enum_def(input: &str) -> IResult<&str, ()> {
     value(
         (),
