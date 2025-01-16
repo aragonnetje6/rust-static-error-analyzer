@@ -1719,6 +1719,40 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
     ))(input)
 }
 
+fn use_tree(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("UseTree"),
+            curlied(tuple((
+                struct_field("prefix", path),
+                struct_field("kind", use_tree_kind),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
+}
+
+fn use_tree_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Simple"), parend(option(ident)))),
+        value(
+            (),
+            preceded(
+                spaced_tag("Nested"),
+                curlied(tuple((
+                    struct_field(
+                        "items",
+                        list(parend(separated_pair(use_tree, spaced_tag(","), node_id))),
+                    ),
+                    struct_field("span", span),
+                ))),
+            ),
+        ),
+        value((), spaced_tag("Glob")),
+    ))(input)
+}
+
 #[derive(Debug, Clone)]
 struct Fn<'a> {
     body: Option<Block<'a>>,
