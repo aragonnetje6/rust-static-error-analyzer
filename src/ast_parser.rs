@@ -205,11 +205,11 @@ fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
         map(
             preceded(
                 spaced_tag("DocComment"),
-                tuple((comment_kind, spaced_string)),
+                parend(separated_pair(comment_kind, spaced_tag(","), spaced_string)),
             ),
             |(kind, symbol)| AttrKind::DocComment(kind, symbol),
         ),
-    ))
+    ))(input)
 }
 
 fn normal_attr(input: &str) -> IResult<&str, ()> {
@@ -219,7 +219,7 @@ fn normal_attr(input: &str) -> IResult<&str, ()> {
             spaced_tag("NormalAttr"),
             curlied(tuple((
                 struct_field("item", attr_item),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -234,7 +234,7 @@ fn attr_item(input: &str) -> IResult<&str, ()> {
                 struct_field("safety", safety),
                 struct_field("path", path),
                 struct_field("args", attr_args),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -256,7 +256,7 @@ fn path(input: &str) -> IResult<&str, ()> {
             curlied(tuple((
                 struct_field("span", span),
                 struct_field("segments", list(path_segment)),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -344,7 +344,7 @@ fn ty(input: &str) -> IResult<&str, ()> {
                 struct_field("id", node_id),
                 struct_field("kind", ty_kind),
                 struct_field("span", span),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -445,7 +445,7 @@ fn expr(input: &str) -> IResult<&str, ()> {
                 struct_field("kind", expr_kind),
                 struct_field("span", span),
                 struct_field("attrs", list(attribute)),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -1347,7 +1347,7 @@ fn pat(input: &str) -> IResult<&str, ()> {
                 struct_field("id", node_id),
                 struct_field("kind", pat_kind),
                 struct_field("span", span),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -1530,6 +1530,13 @@ enum CommentKind {
     Block,
 }
 
+fn comment_kind(input: &str) -> IResult<&str, CommentKind> {
+    alt((
+        value(CommentKind::Line, spaced_tag("Line")),
+        value(CommentKind::Block, spaced_tag("Block")),
+    ))
+}
+
 #[derive(Debug, Clone)]
 struct Item<'a> {
     attrs: Vec<Attribute<'a>>,
@@ -1565,7 +1572,7 @@ fn item(input: &str) -> IResult<&str, Item> {
                 struct_field("vis", visibility),
                 struct_field("ident", ident),
                 struct_field("kind", item_kind),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
         |(attrs, _, span, _, ident, kind, _)| Item::new(attrs, span, ident, kind),
@@ -1580,7 +1587,7 @@ fn visibility(input: &str) -> IResult<&str, ()> {
             curlied(tuple((
                 struct_field("kind", visibility_kind),
                 struct_field("span", span),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )
@@ -1712,7 +1719,7 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
                     ),
                 ),
                 value((), preceded(spaced_tag("MacroDef"), parend(macro_def))),
-                value((), preceded(spaced_tag("Delegation"), parend(delegation))),
+                value((), preceded(spaced_tag("Delegation"), parend(parser_todo))),
             )),
             |_| None,
         ),
@@ -1922,7 +1929,7 @@ fn foreign_item(input: &str) -> IResult<&str, ()> {
                 struct_field("vis", visibility),
                 struct_field("ident", ident),
                 struct_field("kind", foreign_item_kind),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -2190,7 +2197,7 @@ fn block(input: &str) -> IResult<&str, Block> {
                 struct_field("id", node_id),
                 struct_field("rules", block_check_mode),
                 struct_field("span", span),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
                 struct_field("could_be_bare_literal", parse_bool),
             ))),
         ),
@@ -2246,7 +2253,7 @@ fn local(input: &str) -> IResult<&str, ()> {
                 struct_field("span", span),
                 struct_field("colon_sp", option(span)),
                 struct_field("attrs", list(attribute)),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
     )(input)
@@ -2366,7 +2373,7 @@ fn assoc_item(input: &str) -> IResult<&str, AssocItem> {
                 struct_field("vis", visibility),
                 struct_field("ident", ident),
                 struct_field("kind", assoc_item_kind),
-                struct_field("tokens", tokens),
+                struct_field("tokens", option(lazy_attr_token_stream)),
             ))),
         ),
         |(attrs, _, span, _, ident, kind, _)| AssocItem::new(attrs, span, ident, kind),
