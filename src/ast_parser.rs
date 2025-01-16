@@ -109,6 +109,13 @@ fn unit(input: &str) -> IResult<&str, ()> {
     value((), spaced_tag("()"))(input)
 }
 
+fn parser_todo(input: &str) -> IResult<&str, ()> {
+    todo!(
+        "this parser has not been implemented. tried to parse: {}",
+        input
+    )
+}
+
 #[derive(Debug, Clone)]
 struct Crate<'a> {
     attrs: Vec<Attribute<'a>>,
@@ -2025,12 +2032,146 @@ struct Trait<'a> {
     items: Vec<AssocItem<'a>>,
 }
 
+impl<'a> Trait<'a> {
+    fn new(items: Vec<AssocItem<'a>>) -> Self {
+        Self { items }
+    }
+}
+
+fn parse_trait(input: &str) -> IResult<&str, Trait> {
+    map(
+        preceded(
+            spaced_tag("Trait"),
+            curlied(tuple((
+                struct_field("safety", safety),
+                struct_field("is_auto", is_auto),
+                struct_field("generics", generics),
+                struct_field("bounds", list(generic_bound)),
+                struct_field("items", list(assoc_item)),
+            ))),
+        ),
+        |(_, _, _, _, items)| Trait::new(items),
+    )(input)
+}
+
+fn is_auto(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Yes"), spaced_tag("No")))(input)
+}
+
 #[derive(Debug, Clone)]
 struct AssocItem<'a> {
     attrs: Vec<Attribute<'a>>,
     span: Span<'a>,
     ident: Ident<'a>,
-    assoc_fn: Fn<'a>,
+    assoc_fn: Option<Fn<'a>>,
+}
+
+impl<'a> AssocItem<'a> {
+    fn new(
+        attrs: Vec<Attribute<'a>>,
+        span: Span<'a>,
+        ident: Ident<'a>,
+        assoc_fn: Option<Fn<'a>>,
+    ) -> Self {
+        Self {
+            attrs,
+            span,
+            ident,
+            assoc_fn,
+        }
+    }
+}
+
+fn assoc_item(input: &str) -> IResult<&str, AssocItem> {
+    map(
+        preceded(
+            spaced_tag("Item"),
+            curlied(tuple((
+                struct_field("attrs", list(attribute)),
+                struct_field("id", node_id),
+                struct_field("span", span),
+                struct_field("vis", visibility),
+                struct_field("ident", ident),
+                struct_field("kind", assoc_item_kind),
+                struct_field("tokens", tokens),
+            ))),
+        ),
+        |(attrs, _, span, _, ident, kind, _)| AssocItem::new(attrs, span, ident, kind),
+    )(input)
+}
+
+fn assoc_item_kind<'a>(input: &'a str) -> IResult<&'a str, Option<Fn<'a>>> {
+    alt((
+        map(preceded(spaced_tag("Fn"), parend(parse_fn)), Some),
+        map(
+            alt((
+                preceded(spaced_tag("Const"), parend(const_item)),
+                preceded(spaced_tag("Type"), parend(ty_alias)),
+                preceded(spaced_tag("MacCall"), parend(parser_todo)),
+                preceded(spaced_tag("Delegation"), parend(parser_todo)),
+                preceded(spaced_tag("DelegationMac"), parend(parser_todo)),
+            )),
+            |_| None,
+        ),
+    ))(input)
+}
+
+fn const_item(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("ConstItem"),
+            curlied(tuple((
+                struct_field("defaultness", defaultness),
+                struct_field("generics", generics),
+                struct_field("ty", ty),
+                struct_field("expr", option(expr)),
+            ))),
+        ),
+    )(input)
+}
+
+fn ty_alias(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("TyAlias"),
+            curlied(tuple((
+                struct_field("defaultness", defaultness),
+                struct_field("generics", generics),
+                struct_field("where_clauses", ty_alias_where_clauses),
+                struct_field("bounds", list(generic_bound)),
+                struct_field("ty", option(ty)),
+            ))),
+        ),
+    )(input)
+}
+
+fn ty_alias_where_clauses(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("TyAliasWhereClauses"),
+            curlied(tuple((
+                struct_field("before", ty_alias_where_clause),
+                struct_field("after", ty_alias_where_clause),
+                struct_field("split", complete::u64),
+            ))),
+        ),
+    )(input)
+}
+
+fn ty_alias_where_clause(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("TyAliasWhereClause"),
+            curlied(tuple((
+                struct_field("has_where_token", parse_bool),
+                struct_field("span", span),
+            ))),
+        ),
+    )(input)
 }
 
 #[derive(Debug, Clone)]
