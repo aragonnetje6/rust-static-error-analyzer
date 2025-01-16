@@ -105,6 +105,10 @@ where
     ))
 }
 
+fn unit(input: &str) -> IResult<&str, ()> {
+    value((), spaced_tag("()"))(input)
+}
+
 #[derive(Debug, Clone)]
 struct Crate<'a> {
     attrs: Vec<Attribute<'a>>,
@@ -1986,6 +1990,34 @@ fn local_kind(input: &str) -> IResult<&str, ()> {
 struct Mod<'a> {
     items: Vec<Item<'a>>,
     span: Span<'a>,
+}
+
+impl<'a> Mod<'a> {
+    fn new(items: Vec<Item<'a>>, span: Span<'a>) -> Self {
+        Self { items, span }
+    }
+}
+
+fn parse_mod(input: &str) -> IResult<&str, Mod> {
+    map(
+        preceded(
+            spaced_tag("Loaded"),
+            parend(tuple((
+                list(item),
+                spaced_tag(","),
+                inline,
+                spaced_tag(","),
+                modspans,
+                spaced_tag(","),
+                result(unit, unit),
+            ))),
+        ),
+        |(items, _, _, _, span, _, _)| Mod::new(items, span),
+    )(input)
+}
+
+fn inline(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Yes"), spaced_tag("No")))(input)
 }
 
 #[derive(Debug, Clone)]
