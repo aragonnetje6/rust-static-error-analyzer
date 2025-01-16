@@ -1719,6 +1719,47 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
     ))(input)
 }
 
+fn foreign_item_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        value((), preceded(spaced_tag("Static"), parend(static_item))),
+        value((), preceded(spaced_tag("Fn"), parend(parse_fn))),
+        value((), preceded(spaced_tag("TyAlias"), parend(ty_alias))),
+    ))(input)
+}
+
+fn foreign_item(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("Item"),
+            curlied(tuple((
+                struct_field("attrs", list(attribute)),
+                struct_field("id", node_id),
+                struct_field("span", span),
+                struct_field("vis", visibility),
+                struct_field("ident", ident),
+                struct_field("kind", foreign_item_kind),
+                struct_field("tokens", tokens),
+            ))),
+        ),
+    )(input)
+}
+
+fn foreign_mod(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        preceded(
+            spaced_tag("ForeignMod"),
+            curlied(tuple((
+                struct_field("extern_span", span),
+                struct_field("safety", safety),
+                struct_field("abi", option(str_lit)),
+                struct_field("items", list(foreign_item)),
+            ))),
+        ),
+    )(input)
+}
+
 fn static_item(input: &str) -> IResult<&str, ()> {
     value(
         (),
