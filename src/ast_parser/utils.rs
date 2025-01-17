@@ -2,7 +2,7 @@ use nom::{
     branch::alt,
     bytes::complete::{escaped, is_not, tag},
     character::complete,
-    combinator::{map, value},
+    combinator::{cut, map, opt, value},
     error::ParseError,
     multi::{many0, separated_list0},
     sequence::{delimited, pair, preceded, separated_pair, terminated},
@@ -53,7 +53,7 @@ where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    squared(separated_list0(spaced_tag(","), item))
+    squared(terminated(separated_list0(tag(","), item), opt(tag(","))))
 }
 
 pub(crate) fn hashmap<'a, O1, O2, E, P1, P2>(
@@ -70,11 +70,12 @@ where
 
 pub(crate) fn option<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Option<O>, E>
 where
+    O: Clone,
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
     alt((
-        map(spaced_tag("None"), |_| None),
+        value(None, spaced_tag("None")),
         tuple_struct_parser("Some", field(item), Some),
     ))
 }
@@ -113,7 +114,7 @@ where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    preceded(pair(spaced_tag(name), tag(":")), field(value))
+    preceded(pair(spaced_tag(name), tag(":")), cut(field(value)))
 }
 
 pub(crate) fn struct_parser<'a, O, O2, E, P>(
@@ -125,7 +126,7 @@ where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    map(preceded(spaced_tag(name), curlied(fields)), transform)
+    map(preceded(spaced_tag(name), cut(curlied(fields))), transform)
 }
 
 pub(crate) fn field<'a, O, E, P>(value: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
@@ -133,7 +134,7 @@ where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    terminated(value, tag(","))
+    terminated(cut(value), opt(tag(",")))
 }
 
 pub(crate) fn tuple_struct_parser<'a, O, O2, E, P>(
@@ -145,7 +146,7 @@ where
     E: ParseError<&'a str>,
     P: Parser<&'a str, O, E>,
 {
-    map(preceded(spaced_tag(name), parend(fields)), transform)
+    map(preceded(spaced_tag(name), parend(cut(fields))), transform)
 }
 
 pub(crate) fn tuple_parser<'a, O, E, P>(fields: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
@@ -172,7 +173,10 @@ pub(crate) fn id<T>(x: T) -> T {
 pub(crate) fn spaced_string(input: &str) -> IResult<&str, &str> {
     spaced(delimited(
         tag("\""),
-        escaped(is_not("\"'"), '\\', complete::one_of("\"'\\")),
+        map(
+            opt(escaped(is_not("\"\\"), '\\', complete::one_of("\"'"))),
+            |x| x.unwrap_or(""),
+        ),
         tag("\""),
     ))(input)
 }

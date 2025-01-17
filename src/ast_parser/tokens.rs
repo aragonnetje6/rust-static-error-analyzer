@@ -47,8 +47,8 @@ fn delim_spacing(input: &str) -> IResult<&str, ()> {
 fn spacing(input: &str) -> IResult<&str, &str> {
     alt((
         spaced_tag("Alone"),
-        spaced_tag("Joing"),
         spaced_tag("JointHidden"),
+        spaced_tag("Joint"),
     ))(input)
 }
 
@@ -288,4 +288,34 @@ fn token_tree(input: &str) -> IResult<&str, ()> {
             discard,
         ),
     ))(input)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_token() {
+        token(
+r#"Token{kind:Literal(Lit{kind:Str,symbol:"https://docs.rs/syn/2.0.96",suffix:None,},),span:src/lib.rs:252:24:252:52(#0),},"#,        )
+        .unwrap();
+        token(r#"Token { kind: Pound, span: src/lib.rs:252:1: 252:2 (#0) }"#).unwrap();
+    }
+
+    #[test]
+    fn test_token_tree() {
+        token_tree(
+            r#"Token(Token { kind: Literal(Lit { kind: Str, symbol: "https://docs.rs/syn/2.0.96", suffix: None, },),span: src/lib.rs:252:24: 252:52 (#0),},JointHidden,)"#,
+        )
+        .unwrap();
+        token_tree(r#"Token(Token { kind: Pound, span: src/lib.rs:252:1: 252:2 (#0) }, Joint)"#)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_spacing() {
+        field(spacing)("Joint").unwrap();
+        field(spacing)("JointHidden").unwrap();
+        field(spacing)("Joint)").unwrap();
+    }
 }

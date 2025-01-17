@@ -178,6 +178,41 @@ fn cargo_clean(manifest_path: &Path, package_name: &str) -> String {
     stderr
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LibOrBin<'a> {
+    Lib,
+    Bin(&'a str),
+}
+
+pub fn cargo_ast(manifest_path: &Path, lib_or_bin: LibOrBin) -> String {
+    println!("Getting AST...");
+    let mut command = Command::new("cargo");
+    command.arg("+nightly").arg("rustc");
+    let output = match lib_or_bin {
+        LibOrBin::Lib => command.arg("--lib"),
+        LibOrBin::Bin(name) => command.arg("--bin").arg(name),
+    }
+    .arg("--")
+    .arg("-Zunpretty=ast-tree,expanded")
+    .current_dir(
+        manifest_path
+            .parent()
+            .expect("Could not get manifest directory!"),
+    )
+    .output()
+    .expect("Could not get AST!");
+
+    let stderr = String::from_utf8(output.stderr).expect("Invalid UTF8!");
+    let stdout = String::from_utf8(output.stdout).expect("Invalid UTF8!");
+
+    if output.status.code() != Some(0) {
+        eprintln!("Could not get AST!");
+        println!("{stderr:?}");
+    }
+
+    stdout
+}
+
 #[derive(Debug)]
 pub struct ManifestInfo {
     pub package_name: String,

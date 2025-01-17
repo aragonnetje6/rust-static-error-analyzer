@@ -1,3 +1,4 @@
+#![recursion_limit = "1024"]
 #![feature(rustc_private)]
 #![warn(clippy::pedantic, clippy::unwrap_used)]
 #![allow(clippy::cast_precision_loss)]
@@ -17,7 +18,7 @@ extern crate rustc_session;
 
 use analysis::calls_to_chains;
 use clap::Parser;
-use compiler::{get_compiler_args, get_manifest_info, run_compiler, AnalysisCallbacks};
+use compiler::{cargo_ast, get_compiler_args, get_manifest_info, run_compiler, AnalysisCallbacks};
 use graph::CallGraph;
 use std::{
     path::{Path, PathBuf},
@@ -79,6 +80,38 @@ fn main() {
             using_internal_features.clone(),
         );
     }
+
+    let mut asts = vec![];
+    if let Some(_) = manifest_info.lib {
+        asts.push(cargo_ast(&manifest_path, compiler::LibOrBin::Lib));
+    }
+    for name in manifest_info.bins {
+        asts.push(cargo_ast(
+            &manifest_path,
+            compiler::LibOrBin::Bin(&name.name),
+        ));
+    }
+
+    for ast in asts {
+        std::fs::write(
+            "error.txt",
+            match ast_parser::parse(&ast) {
+                Ok(_) => "PARSED",
+                Err(err) => {
+                    match err {
+                        nom::Err::Incomplete(needed) => match needed {
+                            nom::Needed::Unknown => "needed unknown",
+                            nom::Needed::Size(non_zero) => "needed size",
+                        },
+                        nom::Err::Error(x) => x.input,
+                        nom::Err::Failure(x) => x.input,
+                    }
+                    
+                }
+            },
+        );
+    }
+
     let call_graph = Arc::into_inner(callbacks.graph)
         .expect("arc still referenced")
         .into_inner()

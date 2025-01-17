@@ -2,7 +2,7 @@ use nom::{
     branch::alt,
     bytes::complete::is_not,
     character::complete,
-    combinator::{map, value},
+    combinator::{cut, map, value},
     sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult,
 };
@@ -79,7 +79,7 @@ fn attribute(input: &str) -> IResult<&str, Attribute> {
 }
 
 fn attr_id(input: &str) -> IResult<&str, u32> {
-    tuple_struct_parser("NodeId", field(complete::u32), id)(input)
+    tuple_struct_parser("AttrId", complete::u32, id)(input)
 }
 
 pub(crate) fn attr_style(input: &str) -> IResult<&str, &str> {
@@ -118,7 +118,7 @@ fn attr_item(input: &str) -> IResult<&str, ()> {
     struct_parser(
         "AttrItem",
         tuple((
-            struct_field("safety", safety),
+            struct_field("unsafety", safety),
             struct_field("path", path),
             struct_field("args", attr_args),
             struct_field("tokens", option(lazy_attr_token_stream)),
@@ -244,10 +244,14 @@ fn term(input: &str) -> IResult<&str, ()> {
 
 fn generic_arg(input: &str) -> IResult<&str, ()> {
     alt((
-        tuple_struct_parser("Lifetime", field(lifetime), discard),
+        tuple_struct_parser("Lifetime", field(annotated_lifetime), discard),
         tuple_struct_parser("Type", field(ty), discard),
         tuple_struct_parser("Const", field(anon_const), discard),
     ))(input)
+}
+
+fn annotated_lifetime(input: &str) -> IResult<&str, ()> {
+    tuple_struct_parser("lifetime", lifetime, discard)(input)
 }
 
 fn lifetime(input: &str) -> IResult<&str, ()> {
@@ -281,12 +285,12 @@ fn ty_kind(input: &str) -> IResult<&str, ()> {
         tuple_struct_parser("Ptr", field(mut_ty), discard),
         tuple_struct_parser(
             "Ref",
-            tuple((field(option(lifetime)), field(mut_ty))),
+            tuple((field(option(annotated_lifetime)), field(mut_ty))),
             discard,
         ),
         tuple_struct_parser(
             "PinnedRef",
-            tuple((field(option(lifetime)), field(mut_ty))),
+            tuple((field(option(annotated_lifetime)), field(mut_ty))),
             discard,
         ),
         tuple_struct_parser("BareFn", field(bare_fn_ty), discard),
@@ -390,7 +394,7 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
         tuple_struct_parser("Type", tuple((field(expr), field(ty))), discard),
         tuple_struct_parser(
             "Let",
-            tuple((field(pat), field(expr), field(span))),
+            tuple((field(pat), field(expr), field(span), field(recovered))),
             discard,
         ),
         tuple_struct_parser(
@@ -501,6 +505,10 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
             )),
         )),
     ))(input)
+}
+
+fn recovered(input: &str) -> IResult<&str, &str> {
+    spaced_tag("No")(input)
 }
 
 fn parse_format_args(input: &str) -> IResult<&str, ()> {
@@ -838,7 +846,7 @@ fn generic_param(input: &str) -> IResult<&str, ()> {
             struct_field("bounds", list(generic_bound)),
             struct_field("is_placeholder", parse_bool),
             struct_field("kind", generic_param_kind),
-            struct_field("colon_span", span),
+            struct_field("colon_span", option(span)),
         )),
         discard,
     )(input)
@@ -863,7 +871,7 @@ fn generic_param_kind(input: &str) -> IResult<&str, ()> {
 fn generic_bound(input: &str) -> IResult<&str, ()> {
     alt((
         tuple_struct_parser("Trait", field(poly_trait_ref), discard),
-        tuple_struct_parser("Outlives", field(lifetime), discard),
+        tuple_struct_parser("Outlives", field(annotated_lifetime), discard),
         tuple_struct_parser(
             "Use",
             tuple((field(list(precise_capturing_arg)), field(span))),
@@ -874,7 +882,7 @@ fn generic_bound(input: &str) -> IResult<&str, ()> {
 
 fn precise_capturing_arg(input: &str) -> IResult<&str, ()> {
     alt((
-        tuple_struct_parser("Lifetime", field(lifetime), discard),
+        tuple_struct_parser("Lifetime", field(annotated_lifetime), discard),
         tuple_struct_parser("Arg", tuple((field(path), field(node_id))), discard),
     ))(input)
 }
@@ -1216,15 +1224,15 @@ fn visibility_kind(input: &str) -> IResult<&str, ()> {
 pub(crate) struct Span<'a>(&'a str);
 
 pub(crate) fn span(input: &str) -> IResult<&str, Span> {
-    map(spaced_string, Span)(input)
+    map(is_not(",}"), Span)(input)
 }
 
 fn modspans(input: &str) -> IResult<&str, Span> {
     struct_parser(
-        "Item",
+        "ModSpans",
         tuple((
             struct_field("inner_span", span),
-            struct_field("outer_span", span),
+            struct_field("inject_use_span", span),
         )),
         |(span, _)| span,
     )(input)
@@ -1234,7 +1242,7 @@ fn modspans(input: &str) -> IResult<&str, Span> {
 struct Ident<'a>(&'a str);
 
 fn ident(input: &str) -> IResult<&str, Ident> {
-    map(spaced_string, Ident)(input)
+    map(is_not("),"), Ident)(input)
 }
 
 #[derive(Debug, Clone)]
@@ -1250,7 +1258,9 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
         map(
             alt((
                 tuple_struct_parser("Fn", field(parse_fn), ItemKind::Fn),
-                tuple_struct_parser("Mod", field(parse_mod), ItemKind::Mod),
+                tuple_struct_parser("Mod", tuple((field(safety), field(parse_mod))), |(_, x)| {
+                    ItemKind::Mod(x)
+                }),
                 tuple_struct_parser("Trait", field(parse_trait), ItemKind::Trait),
                 tuple_struct_parser("Impl", field(parse_impl), ItemKind::Impl),
             )),
@@ -1361,7 +1371,7 @@ fn field_def(input: &str) -> IResult<&str, ()> {
             struct_field("span", span),
             struct_field("vis", visibility),
             struct_field("safety", safety),
-            struct_field("ident", ident),
+            struct_field("ident", option(ident)),
             struct_field("ty", ty),
             struct_field("default", option(anon_const)),
             struct_field("is_placeholder", parse_bool),
@@ -1587,7 +1597,7 @@ fn where_region_predicate(input: &str) -> IResult<&str, ()> {
     struct_parser(
         "WhereRegionPredicate",
         tuple((
-            struct_field("lifetime", lifetime),
+            struct_field("lifetime", annotated_lifetime),
             struct_field("bounds", list(generic_bound)),
         )),
         discard,
@@ -1879,7 +1889,17 @@ fn parse_impl(input: &str) -> IResult<&str, Impl> {
 
 fn impl_polarity(input: &str) -> IResult<&str, ()> {
     alt((
-        unit_struct_parser("Positive", ()),
+        unit_struct_parser("\"positive\"", ()),
         tuple_struct_parser("Negative", field(span), discard),
     ))(input)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_lifetime() {
+        annotated_lifetime("lifetime(63: 'a)").unwrap();
+    }
 }
