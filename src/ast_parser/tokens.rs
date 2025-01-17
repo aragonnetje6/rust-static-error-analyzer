@@ -257,7 +257,6 @@ pub(crate) fn lit(input: &str) -> IResult<&str, ()> {
 pub(crate) fn lit_kind(input: &str) -> IResult<&str, ()> {
     alt((
         unit_struct_parser("Bool", ()),
-        unit_struct_parser("Byte", ()),
         unit_struct_parser("Char", ()),
         unit_struct_parser("Integer", ()),
         unit_struct_parser("Float", ()),
@@ -267,6 +266,7 @@ pub(crate) fn lit_kind(input: &str) -> IResult<&str, ()> {
         unit_struct_parser("Str", ()),
         tuple_struct_parser("CStrRaw", field(spaced(digit0)), discard),
         unit_struct_parser("CStr", ()),
+        unit_struct_parser("Byte", ()),
     ))(input)
 }
 

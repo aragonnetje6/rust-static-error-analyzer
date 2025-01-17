@@ -65,7 +65,7 @@ where
     P1: Parser<&'a str, O1, E>,
     P2: Parser<&'a str, O2, E>,
 {
-    curlied(many0(separated_pair(key, spaced_tag(":"), value)))
+    curlied(many0(separated_pair(key, spaced_tag(":"), field(value))))
 }
 
 pub(crate) fn option<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Option<O>, E>
@@ -174,7 +174,7 @@ pub(crate) fn spaced_string(input: &str) -> IResult<&str, &str> {
     spaced(delimited(
         tag("\""),
         map(
-            opt(escaped(is_not("\"\\"), '\\', complete::one_of("\"'\\"))),
+            opt(escaped(is_not("\"\\"), '\\', complete::anychar)), // complete::one_of("\"'\\u"))),
             |x| x.unwrap_or(""),
         ),
         tag("\""),

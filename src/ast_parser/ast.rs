@@ -560,7 +560,7 @@ fn format_argument_kind(input: &str) -> IResult<&str, ()> {
     alt((
         unit_struct_parser("Normal", ()),
         tuple_struct_parser("Named", field(ident), discard),
-        tuple_struct_parser("captured", field(ident), discard),
+        tuple_struct_parser("Captured", field(ident), discard),
     ))(input)
 }
 
