@@ -1,176 +1,30 @@
 use nom::{
     branch::alt,
-    bytes::complete::{escaped, is_not, tag},
+    bytes::complete::is_not,
     character::complete,
     combinator::{map, value},
-    error::ParseError,
-    multi::{many0, separated_list0},
-    sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
-    IResult, Parser,
+    sequence::{delimited, pair, preceded, separated_pair, tuple},
+    IResult,
 };
 
-fn spaced<'a, O, E, P>(parser: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    preceded(complete::multispace0, parser)
-}
+use super::{
+    tokens::{
+        comment_kind, delim_span, delimiter, lazy_attr_token_stream, lit, lit_kind, token_stream,
+        CommentKind,
+    },
+    utils::{
+        discard, field, hashmap, id, list, option, parend, parse_bool, parser_todo, result,
+        spaced_string, spaced_tag, struct_field, struct_parser, tuple_parser, tuple_struct_parser,
+        unit, unit_struct_parser,
+    },
+};
 
-fn spaced_tag<'a, E>(pat: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &'a str, E>
-where
-    E: ParseError<&'a str>,
-{
-    spaced(tag(pat))
-}
-
-fn curlied<'a, O, E, P>(parser: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    delimited(spaced_tag("{"), parser, spaced_tag("}"))
-}
-
-fn squared<'a, O, E, P>(parser: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    delimited(spaced_tag("["), parser, spaced_tag("]"))
-}
-
-fn parend<'a, O, E, P>(parser: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    delimited(spaced_tag("("), parser, spaced_tag(")"))
-}
-
-fn list<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Vec<O>, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    squared(separated_list0(spaced_tag(","), item))
-}
-
-fn hashmap<'a, O1, O2, E, P1, P2>(
-    key: P1,
-    value: P2,
-) -> impl FnMut(&'a str) -> IResult<&'a str, Vec<(O1, O2)>, E>
-where
-    E: ParseError<&'a str>,
-    P1: Parser<&'a str, O1, E>,
-    P2: Parser<&'a str, O2, E>,
-{
-    curlied(many0(separated_pair(key, spaced_tag(":"), value)))
-}
-
-fn option<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Option<O>, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    alt((
-        map(spaced_tag("None"), |_| None),
-        tuple_struct_parser("Some", field(item), Some),
-    ))
-}
-
-fn result<'a, O1, O2, E, P1, P2>(
-    ok: P1,
-    err: P2,
-) -> impl FnMut(&'a str) -> IResult<&'a str, Result<O1, O2>, E>
-where
-    E: ParseError<&'a str>,
-    P1: Parser<&'a str, O1, E>,
-    P2: Parser<&'a str, O2, E>,
-{
-    alt((
-        tuple_struct_parser("Ok", field(ok), Ok),
-        tuple_struct_parser("Err", field(err), Err),
-    ))
-}
-
-fn unit(input: &str) -> IResult<&str, ()> {
-    value((), spaced_tag("()"))(input)
-}
-
-fn parser_todo(input: &str) -> IResult<&str, ()> {
-    todo!(
-        "this parser has not been implemented. tried to parse: {}",
-        input
-    )
-}
-
-fn struct_field<'a, O, E, P>(
-    name: &'a str,
-    value: P,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    preceded(pair(spaced_tag(name), tag(":")), field(value))
-}
-
-fn struct_parser<'a, O, O2, E, P>(
-    name: &'a str,
-    fields: P,
-    transform: fn(O) -> O2,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O2, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    map(preceded(spaced_tag(name), curlied(fields)), transform)
-}
-
-fn field<'a, O, E, P>(value: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    terminated(value, tag(","))
-}
-
-fn tuple_struct_parser<'a, O, O2, E, P>(
-    name: &'a str,
-    fields: P,
-    transform: fn(O) -> O2,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O2, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    map(preceded(spaced_tag(name), parend(fields)), transform)
-}
-
-fn tuple_parser<'a, O, E, P>(fields: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    parend(fields)
-}
-
-fn unit_struct_parser<'a, T: Clone, E: ParseError<&'a str>>(
-    name: &'a str,
-    val: T,
-) -> impl FnMut(&'a str) -> IResult<&'a str, T, E> {
-    value(val, spaced_tag(name))
-}
-
-fn discard<T>(_: T) {}
-
-fn id<T>(x: T) -> T {
-    x
+pub fn parse(input: &str) -> IResult<&str, Crate> {
+    krate(input)
 }
 
 #[derive(Debug, Clone)]
-struct Crate<'a> {
+pub struct Crate<'a> {
     attrs: Vec<Attribute<'a>>,
     items: Vec<Item<'a>>,
 }
@@ -191,19 +45,12 @@ fn krate(input: &str) -> IResult<&str, Crate> {
             struct_field("id", node_id),
             struct_field("is_placeholder", parse_bool),
         )),
-        |(attrs, items, _, _, _)| Crate::new(attrs, items),
+        |(attrs, items, _, _, _)| Crate::new(attrs, items.into_iter().flatten().collect()),
     )(input)
 }
 
 fn node_id(input: &str) -> IResult<&str, u32> {
     tuple_struct_parser("NodeId", complete::u32, id)(input)
-}
-
-fn parse_bool(input: &str) -> IResult<&str, bool> {
-    alt((
-        value(true, spaced_tag("true")),
-        value(false, spaced_tag("false")),
-    ))(input)
 }
 
 #[derive(Debug, Clone)]
@@ -235,7 +82,7 @@ fn attr_id(input: &str) -> IResult<&str, u32> {
     tuple_struct_parser("NodeId", field(complete::u32), id)(input)
 }
 
-fn attr_style(input: &str) -> IResult<&str, &str> {
+pub(crate) fn attr_style(input: &str) -> IResult<&str, &str> {
     alt((spaced_tag("Outer"), spaced_tag("Inner")))(input)
 }
 
@@ -1167,34 +1014,6 @@ fn un_op(input: &str) -> IResult<&str, &str> {
     alt((spaced_tag("Deref"), spaced_tag("Not"), spaced_tag("Neg")))(input)
 }
 
-fn lit(input: &str) -> IResult<&str, ()> {
-    struct_parser(
-        "Lit",
-        tuple((
-            struct_field("kind", lit_kind),
-            struct_field("symbol", spaced_string),
-            struct_field("suffix", option(spaced_string)),
-        )),
-        discard,
-    )(input)
-}
-
-fn lit_kind(input: &str) -> IResult<&str, ()> {
-    alt((
-        unit_struct_parser("Bool", ()),
-        unit_struct_parser("Byte", ()),
-        unit_struct_parser("Char", ()),
-        unit_struct_parser("Integer", ()),
-        unit_struct_parser("Float", ()),
-        unit_struct_parser("Str", ()),
-        tuple_struct_parser("StrRaw", field(complete::u8), discard),
-        unit_struct_parser("ByteStr", ()),
-        tuple_struct_parser("ByteStrRaw", field(complete::u8), discard),
-        unit_struct_parser("CStr", ()),
-        tuple_struct_parser("CStrRaw", field(complete::u8), discard),
-    ))(input)
-}
-
 fn pat(input: &str) -> IResult<&str, ()> {
     struct_parser(
         "Pat",
@@ -1326,19 +1145,6 @@ fn range_syntax(input: &str) -> IResult<&str, &str> {
 }
 
 #[derive(Debug, Clone)]
-enum CommentKind {
-    Line,
-    Block,
-}
-
-fn comment_kind(input: &str) -> IResult<&str, CommentKind> {
-    alt((
-        unit_struct_parser("Line", CommentKind::Line),
-        unit_struct_parser("Block", CommentKind::Block),
-    ))(input)
-}
-
-#[derive(Debug, Clone)]
 struct Item<'a> {
     attrs: Vec<Attribute<'a>>,
     span: Span<'a>,
@@ -1362,7 +1168,7 @@ impl<'a> Item<'a> {
     }
 }
 
-fn item(input: &str) -> IResult<&str, Item> {
+fn item(input: &str) -> IResult<&str, Option<Item>> {
     struct_parser(
         "Item",
         tuple((
@@ -1374,7 +1180,7 @@ fn item(input: &str) -> IResult<&str, Item> {
             struct_field("kind", item_kind),
             struct_field("tokens", option(lazy_attr_token_stream)),
         )),
-        |(attrs, _, span, _, ident, kind, _)| Item::new(attrs, span, ident, kind),
+        |(attrs, _, span, _, ident, kind, _)| Some(Item::new(attrs, span, ident, kind?)),
     )(input)
 }
 
@@ -1407,17 +1213,9 @@ fn visibility_kind(input: &str) -> IResult<&str, ()> {
 }
 
 #[derive(Debug, Clone)]
-struct Span<'a>(&'a str);
+pub(crate) struct Span<'a>(&'a str);
 
-fn spaced_string(input: &str) -> IResult<&str, &str> {
-    spaced(delimited(
-        tag("\""),
-        escaped(is_not("\"'"), '\\', complete::one_of("\"'\\")),
-        tag("\""),
-    ))(input)
-}
-
-fn span(input: &str) -> IResult<&str, Span> {
+pub(crate) fn span(input: &str) -> IResult<&str, Span> {
     map(spaced_string, Span)(input)
 }
 
@@ -1512,71 +1310,6 @@ fn delim_args(input: &str) -> IResult<&str, ()> {
         )),
         discard,
     )(input)
-}
-
-fn delim_span(input: &str) -> IResult<&str, ()> {
-    struct_parser(
-        "DelimSpan",
-        tuple((struct_field("open", span), struct_field("close", span))),
-        discard,
-    )(input)
-}
-
-fn delimiter(input: &str) -> IResult<&str, ()> {
-    alt((
-        unit_struct_parser("Parenthesis", ()),
-        unit_struct_parser("Brace", ()),
-        unit_struct_parser("Bracket", ()),
-        tuple_struct_parser("Invisible", field(invisible_origin), discard),
-    ))(input)
-}
-
-fn invisible_origin(input: &str) -> IResult<&str, ()> {
-    alt((
-        tuple_struct_parser("MetaVar", field(meta_var_kind), discard),
-        unit_struct_parser("ProcMacro", ()),
-        unit_struct_parser("FlattenToken", ()),
-    ))(input)
-}
-
-fn meta_var_kind(input: &str) -> IResult<&str, ()> {
-    alt((
-        tuple_struct_parser("Pat", field(nt_pat_kind), discard),
-        struct_parser(
-            "Expr",
-            tuple((
-                struct_field("kind", nt_expr_kind),
-                struct_field("can_begin_literal_maybe_minus", parse_bool),
-                struct_field("can_begin_string_literal", parse_bool),
-            )),
-            discard,
-        ),
-        unit_struct_parser("Item", ()),
-        unit_struct_parser("Block", ()),
-        unit_struct_parser("Stmt", ()),
-        unit_struct_parser("Ty", ()),
-        unit_struct_parser("Ident", ()),
-        unit_struct_parser("Lifetime", ()),
-        unit_struct_parser("Literal", ()),
-        unit_struct_parser("Meta", ()),
-        unit_struct_parser("Path", ()),
-        unit_struct_parser("Vis", ()),
-        unit_struct_parser("TT", ()),
-    ))(input)
-}
-
-fn nt_expr_kind(input: &str) -> IResult<&str, ()> {
-    alt((
-        struct_parser("Expr2021", struct_field("inferred", parse_bool), discard),
-        unit_struct_parser("Expr", ()),
-    ))(input)
-}
-
-fn nt_pat_kind(input: &str) -> IResult<&str, ()> {
-    alt((
-        struct_parser("PatParam", struct_field("inferred", parse_bool), discard),
-        unit_struct_parser("PatWithOr", ()),
-    ))(input)
 }
 
 fn enum_def(input: &str) -> IResult<&str, ()> {
@@ -1707,7 +1440,7 @@ fn use_tree_kind(input: &str) -> IResult<&str, ()> {
             tuple((
                 struct_field(
                     "items",
-                    list(parend(separated_pair(use_tree, spaced_tag(","), node_id))),
+                    list(tuple_parser(tuple((field(use_tree), field(node_id))))),
                 ),
                 struct_field("span", span),
             )),
@@ -1973,7 +1706,7 @@ fn parse_mod(input: &str) -> IResult<&str, Mod> {
             field(modspans),
             field(result(unit, unit)),
         )),
-        |(items, _, span, _)| Mod::new(items, span),
+        |(items, _, span, _)| Mod::new(items.into_iter().flatten().collect(), span),
     )(input)
 }
 
