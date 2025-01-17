@@ -466,6 +466,43 @@ fn ty_kind(input: &str) -> IResult<&str, ()> {
     ))(input)
 }
 
+fn trait_object_syntax(input: &str) -> IResult<&str, &str> {
+    alt((spaced_tag("Dyn"), spaced_tag("DynStar"), spaced_tag("None")))(input)
+}
+
+fn unsafe_binder_ty(input: &str) -> IResult<&str, ()> {
+    struct_parser(
+        "UnsafeBinderTy",
+        tuple((
+            struct_field("generic_params", list(generic_param)),
+            struct_field("inner_ty", ty),
+        )),
+        discard,
+    )(input)
+}
+
+fn bare_fn_ty(input: &str) -> IResult<&str, ()> {
+    struct_parser(
+        "BareFnTy",
+        tuple((
+            struct_field("safety", safety),
+            struct_field("ext", parse_extern),
+            struct_field("generic_params", list(generic_param)),
+            struct_field("decl", fn_decl),
+            struct_field("decl_span", span),
+        )),
+        discard,
+    )(input)
+}
+
+fn mut_ty(input: &str) -> IResult<&str, ()> {
+    struct_parser(
+        "MutTy",
+        tuple((struct_field("ty", ty), struct_field("mutbl", mutability))),
+        discard,
+    )(input)
+}
+
 fn anon_const(input: &str) -> IResult<&str, ()> {
     struct_parser(
         "AnonConst",
