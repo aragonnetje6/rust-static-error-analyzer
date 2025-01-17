@@ -192,6 +192,7 @@ pub fn cargo_ast(manifest_path: &Path, lib_or_bin: LibOrBin) -> String {
         LibOrBin::Lib => command.arg("--lib"),
         LibOrBin::Bin(name) => command.arg("--bin").arg(name),
     }
+    .arg("--all-features")
     .arg("--")
     .arg("-Zunpretty=ast-tree,expanded")
     .current_dir(

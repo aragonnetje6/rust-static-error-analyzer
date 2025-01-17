@@ -1,7 +1,7 @@
 use nom::{
     branch::alt,
     bytes::complete::is_not,
-    character::complete,
+    character::complete::{self, digit1},
     combinator::{cut, map, value},
     sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult,
@@ -13,7 +13,7 @@ use super::{
         CommentKind,
     },
     utils::{
-        discard, field, hashmap, id, list, option, parend, parse_bool, parser_todo, result,
+        discard, field, hashmap, id, list, option, parend, parse_bool, parser_todo, result, spaced,
         spaced_string, spaced_tag, struct_field, struct_parser, tuple_parser, tuple_struct_parser,
         unit, unit_struct_parser,
     },
@@ -50,7 +50,7 @@ fn krate(input: &str) -> IResult<&str, Crate> {
 }
 
 fn node_id(input: &str) -> IResult<&str, u32> {
-    tuple_struct_parser("NodeId", complete::u32, id)(input)
+    tuple_struct_parser("NodeId", spaced(complete::u32), id)(input)
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +79,7 @@ fn attribute(input: &str) -> IResult<&str, Attribute> {
 }
 
 fn attr_id(input: &str) -> IResult<&str, u32> {
-    tuple_struct_parser("AttrId", complete::u32, id)(input)
+    tuple_struct_parser("AttrId", spaced(complete::u32), id)(input)
 }
 
 pub(crate) fn attr_style(input: &str) -> IResult<&str, &str> {
@@ -132,7 +132,7 @@ fn attr_args(input: &str) -> IResult<&str, ()> {
         unit_struct_parser("Empty", ()),
         tuple_struct_parser("Delimited", field(delim_args), discard),
         struct_parser(
-            "Delimited",
+            "Eq",
             tuple((struct_field("eq_span", span), struct_field("expr", expr))),
             discard,
         ),
@@ -258,7 +258,7 @@ fn lifetime(input: &str) -> IResult<&str, ()> {
     value(
         (),
         separated_pair(
-            complete::u32,
+            spaced(digit1),
             spaced_tag(":"),
             pair(spaced_tag("'"), is_not(")")),
         ),
@@ -388,7 +388,7 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
             tuple((field(bin_op), field(expr), field(expr))),
             discard,
         ),
-        tuple_struct_parser("UnOp", tuple((field(un_op), field(expr))), discard),
+        tuple_struct_parser("Unary", tuple((field(un_op), field(expr))), discard),
         tuple_struct_parser("Lit", field(lit), discard),
         tuple_struct_parser("Cast", tuple((field(expr), field(ty))), discard),
         tuple_struct_parser("Type", tuple((field(expr), field(ty))), discard),
@@ -479,7 +479,11 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
                 tuple((field(borrow_kind), field(mutability), field(expr))),
                 discard,
             ),
-            tuple_struct_parser("Break", tuple((field(option(label)), field(expr))), discard),
+            tuple_struct_parser(
+                "Break",
+                tuple((field(option(label)), field(option(expr)))),
+                discard,
+            ),
             tuple_struct_parser("Continue", field(option(label)), discard),
             tuple_struct_parser("InlineAsm", field(inline_asm), discard),
             tuple_struct_parser("OffsetOf", tuple((field(ty), field(list(ident)))), discard),
@@ -492,6 +496,7 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
             tuple_struct_parser("Become", field(expr), discard),
             alt((
                 tuple_struct_parser("FormatArgs", field(parse_format_args), discard),
+                tuple_struct_parser("Ret", field(option(expr)), discard),
                 tuple_struct_parser(
                     "UnsafeBinderCast",
                     tuple((
@@ -532,9 +537,9 @@ fn format_arguments(input: &str) -> IResult<&str, ()> {
         "FormatArguments",
         tuple((
             struct_field("arguments", list(format_argument)),
-            struct_field("num_unnamed_args", complete::u64),
-            struct_field("num_explicit_args", complete::u64),
-            struct_field("names", hashmap(spaced_string, complete::u64)),
+            struct_field("num_unnamed_args", spaced(digit1)),
+            struct_field("num_explicit_args", spaced(digit1)),
+            struct_field("names", hashmap(spaced_string, spaced(digit1))),
         )),
         discard,
     )(input)
@@ -571,7 +576,7 @@ fn format_placeholder(input: &str) -> IResult<&str, ()> {
         "FormatPlaceholder",
         tuple((
             struct_field("argument", format_arg_position),
-            struct_field("span", span),
+            struct_field("span", option(span)),
             struct_field("format_trait", format_trait),
             struct_field("format_options", format_options),
         )),
@@ -605,7 +610,7 @@ fn format_options(input: &str) -> IResult<&str, ()> {
 
 fn format_count(input: &str) -> IResult<&str, ()> {
     alt((
-        tuple_struct_parser("Literal", field(complete::u64), discard),
+        tuple_struct_parser("Literal", field(spaced(digit1)), discard),
         tuple_struct_parser("Argument", field(format_arg_position), discard),
     ))(input)
 }
@@ -644,7 +649,7 @@ fn format_arg_position(input: &str) -> IResult<&str, ()> {
     struct_parser(
         "FormatArgPosition",
         tuple((
-            struct_field("index", result(complete::u64, complete::u64)),
+            struct_field("index", result(spaced(digit1), spaced(digit1))),
             struct_field("kind", format_arg_position_kind),
             struct_field("span", option(span)),
         )),
@@ -1107,7 +1112,7 @@ fn q_self(input: &str) -> IResult<&str, ()> {
         tuple((
             struct_field("ty", ty),
             struct_field("path_span", span),
-            struct_field("position", complete::u64),
+            struct_field("position", spaced(digit1)),
         )),
         discard,
     )(input)
@@ -1239,9 +1244,9 @@ fn modspans(input: &str) -> IResult<&str, Span> {
 }
 
 #[derive(Debug, Clone)]
-struct Ident<'a>(&'a str);
+pub(crate) struct Ident<'a>(&'a str);
 
-fn ident(input: &str) -> IResult<&str, Ident> {
+pub(crate) fn ident(input: &str) -> IResult<&str, Ident> {
     map(is_not("),"), Ident)(input)
 }
 
@@ -1534,7 +1539,7 @@ fn str_lit(input: &str) -> IResult<&str, ()> {
 fn str_style(input: &str) -> IResult<&str, ()> {
     alt((
         unit_struct_parser("Cooked", ()),
-        tuple_struct_parser("Raw", field(complete::u8), discard),
+        tuple_struct_parser("Raw", field(spaced(digit1)), discard),
     ))(input)
 }
 
@@ -1842,7 +1847,7 @@ fn ty_alias_where_clauses(input: &str) -> IResult<&str, ()> {
         tuple((
             struct_field("before", ty_alias_where_clause),
             struct_field("after", ty_alias_where_clause),
-            struct_field("split", complete::u64),
+            struct_field("split", spaced(digit1)),
         )),
         discard,
     )(input)

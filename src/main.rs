@@ -92,12 +92,16 @@ fn main() {
         ));
     }
 
+    println!("parsing ASTs");
+
     for ast in asts {
-        std::fs::write(
-            "error.txt",
-            match ast_parser::parse(&ast) {
-                Ok(_) => "PARSED",
-                Err(err) => {
+        match ast_parser::parse(&ast) {
+            Ok(_) => {
+                println!("parsing succeeded");
+            }
+            Err(err) => {
+                std::fs::write(
+                    "error.txt",
                     match err {
                         nom::Err::Incomplete(needed) => match needed {
                             nom::Needed::Unknown => "needed unknown",
@@ -105,11 +109,11 @@ fn main() {
                         },
                         nom::Err::Error(x) => x.input,
                         nom::Err::Failure(x) => x.input,
-                    }
-                    
-                }
-            },
-        );
+                    },
+                );
+                
+            }
+        }
     }
 
     let call_graph = Arc::into_inner(callbacks.graph)

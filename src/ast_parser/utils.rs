@@ -174,7 +174,7 @@ pub(crate) fn spaced_string(input: &str) -> IResult<&str, &str> {
     spaced(delimited(
         tag("\""),
         map(
-            opt(escaped(is_not("\"\\"), '\\', complete::one_of("\"'"))),
+            opt(escaped(is_not("\"\\"), '\\', complete::one_of("\"'\\"))),
             |x| x.unwrap_or(""),
         ),
         tag("\""),

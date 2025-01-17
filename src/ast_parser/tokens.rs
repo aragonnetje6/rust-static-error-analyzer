@@ -1,9 +1,9 @@
-use nom::{branch::alt, character::complete, sequence::tuple, IResult};
+use nom::{branch::alt, character::complete::digit0, sequence::tuple, IResult};
 
 use super::{
-    ast::{attr_style, span},
+    ast::{attr_style, ident, span},
     utils::{
-        discard, field, list, option, parse_bool, parser_todo, spaced_string, spaced_tag,
+        discard, field, list, option, parse_bool, parser_todo, spaced, spaced_string, spaced_tag,
         struct_field, struct_parser, tuple_struct_parser, unit_struct_parser,
     },
 };
@@ -62,24 +62,24 @@ fn token(input: &str) -> IResult<&str, ()> {
 
 fn token_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        unit_struct_parser("Eq", ()),
         unit_struct_parser("Lt", ()),
         unit_struct_parser("Le", ()),
         unit_struct_parser("EqEq", ()),
         unit_struct_parser("Ne", ()),
+        unit_struct_parser("Eq", ()),
         unit_struct_parser("Ge", ()),
         unit_struct_parser("Gt", ()),
         unit_struct_parser("AndAnd", ()),
         unit_struct_parser("OrOr", ()),
         unit_struct_parser("Not", ()),
         unit_struct_parser("Tilde", ()),
-        tuple_struct_parser("BinOp", field(bin_op_token), discard),
         tuple_struct_parser("BinOpEq", field(bin_op_token), discard),
+        tuple_struct_parser("BinOp", field(bin_op_token), discard),
         unit_struct_parser("At", ()),
-        unit_struct_parser("Dot", ()),
-        unit_struct_parser("DotDot", ()),
         unit_struct_parser("DotDotDot", ()),
         unit_struct_parser("DotDotEq", ()),
+        unit_struct_parser("DotDot", ()),
+        unit_struct_parser("Dot", ()),
         unit_struct_parser("Comma", ()),
         unit_struct_parser("Semi", ()),
         alt((
@@ -102,7 +102,7 @@ fn token_kind(input: &str) -> IResult<&str, ()> {
             ),
             tuple_struct_parser(
                 "NtIdent",
-                tuple((field(spaced_string), field(ident_is_raw))),
+                tuple((field(ident), field(ident_is_raw))),
                 discard,
             ),
             tuple_struct_parser(
@@ -261,12 +261,12 @@ pub(crate) fn lit_kind(input: &str) -> IResult<&str, ()> {
         unit_struct_parser("Char", ()),
         unit_struct_parser("Integer", ()),
         unit_struct_parser("Float", ()),
-        unit_struct_parser("Str", ()),
-        tuple_struct_parser("StrRaw", field(complete::u8), discard),
+        tuple_struct_parser("StrRaw", field(spaced(digit0)), discard),
+        tuple_struct_parser("ByteStrRaw", field(spaced(digit0)), discard),
         unit_struct_parser("ByteStr", ()),
-        tuple_struct_parser("ByteStrRaw", field(complete::u8), discard),
+        unit_struct_parser("Str", ()),
+        tuple_struct_parser("CStrRaw", field(spaced(digit0)), discard),
         unit_struct_parser("CStr", ()),
-        tuple_struct_parser("CStrRaw", field(complete::u8), discard),
     ))(input)
 }
 
