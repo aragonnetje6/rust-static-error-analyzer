@@ -5,7 +5,7 @@ use nom::{
     combinator::{map, value},
     error::ParseError,
     multi::{many0, separated_list0},
-    sequence::{delimited, pair, preceded, separated_pair, tuple},
+    sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult, Parser,
 };
 
@@ -48,17 +48,6 @@ where
     delimited(spaced_tag("("), parser, spaced_tag(")"))
 }
 
-fn struct_field<'a, O, E, P>(
-    name: &'a str,
-    value: P,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    E: ParseError<&'a str>,
-    P: Parser<&'a str, O, E>,
-{
-    delimited(pair(spaced_tag(name), tag(":")), value, tag(","))
-}
-
 fn list<'a, O, E, P>(item: P) -> impl FnMut(&'a str) -> IResult<&'a str, Vec<O>, E>
 where
     E: ParseError<&'a str>,
@@ -86,7 +75,7 @@ where
 {
     alt((
         map(spaced_tag("None"), |_| None),
-        map(preceded(spaced_tag("Some"), parend(item)), Some),
+        tuple_struct_parser("Some", field(item), Some),
     ))
 }
 
@@ -100,8 +89,8 @@ where
     P2: Parser<&'a str, O2, E>,
 {
     alt((
-        map(preceded(spaced_tag("Ok"), parend(ok)), Ok),
-        map(preceded(spaced_tag("Err"), parend(err)), Err),
+        tuple_struct_parser("Ok", field(ok), Ok),
+        tuple_struct_parser("Err", field(err), Err),
     ))
 }
 
@@ -116,6 +105,17 @@ fn parser_todo(input: &str) -> IResult<&str, ()> {
     )
 }
 
+fn struct_field<'a, O, E, P>(
+    name: &'a str,
+    value: P,
+) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
+where
+    E: ParseError<&'a str>,
+    P: Parser<&'a str, O, E>,
+{
+    preceded(pair(spaced_tag(name), tag(":")), field(value))
+}
+
 fn struct_parser<'a, O, O2, E, P>(
     name: &'a str,
     fields: P,
@@ -126,6 +126,41 @@ where
     P: Parser<&'a str, O, E>,
 {
     map(preceded(spaced_tag(name), curlied(fields)), transform)
+}
+
+fn field<'a, O, E, P>(value: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
+where
+    E: ParseError<&'a str>,
+    P: Parser<&'a str, O, E>,
+{
+    terminated(value, tag(","))
+}
+
+fn tuple_struct_parser<'a, O, O2, E, P>(
+    name: &'a str,
+    fields: P,
+    transform: fn(O) -> O2,
+) -> impl FnMut(&'a str) -> IResult<&'a str, O2, E>
+where
+    E: ParseError<&'a str>,
+    P: Parser<&'a str, O, E>,
+{
+    map(preceded(spaced_tag(name), parend(fields)), transform)
+}
+
+fn tuple_parser<'a, O, E, P>(fields: P) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
+where
+    E: ParseError<&'a str>,
+    P: Parser<&'a str, O, E>,
+{
+    parend(fields)
+}
+
+fn unit_struct_parser<'a, T: Clone, E: ParseError<&'a str>>(
+    name: &'a str,
+    val: T,
+) -> impl FnMut(&'a str) -> IResult<&'a str, T, E> {
+    value(val, spaced_tag(name))
 }
 
 fn discard<T>(_: T) {}
@@ -161,7 +196,7 @@ fn krate(input: &str) -> IResult<&str, Crate> {
 }
 
 fn node_id(input: &str) -> IResult<&str, u32> {
-    preceded(spaced_tag("NodeId"), parend(complete::u32))(input)
+    tuple_struct_parser("NodeId", complete::u32, id)(input)
 }
 
 fn parse_bool(input: &str) -> IResult<&str, bool> {
@@ -197,7 +232,7 @@ fn attribute(input: &str) -> IResult<&str, Attribute> {
 }
 
 fn attr_id(input: &str) -> IResult<&str, u32> {
-    preceded(spaced_tag("NodeId"), parend(complete::u32))(input)
+    tuple_struct_parser("NodeId", field(complete::u32), id)(input)
 }
 
 fn attr_style(input: &str) -> IResult<&str, &str> {
@@ -212,15 +247,10 @@ enum AttrKind<'a> {
 
 fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
     alt((
-        value(
-            AttrKind::Normal,
-            preceded(spaced_tag("Normal"), parend(normal_attr)),
-        ),
-        map(
-            preceded(
-                spaced_tag("DocComment"),
-                parend(separated_pair(comment_kind, spaced_tag(","), spaced_string)),
-            ),
+        tuple_struct_parser("Normal", field(normal_attr), |_| AttrKind::Normal),
+        tuple_struct_parser(
+            "DocComment",
+            tuple((field(comment_kind), field(spaced_string))),
             |(kind, symbol)| AttrKind::DocComment(kind, symbol),
         ),
     ))(input)
@@ -252,8 +282,8 @@ fn attr_item(input: &str) -> IResult<&str, ()> {
 
 fn attr_args(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Empty")),
-        value((), preceded(spaced_tag("Delimited"), parend(delim_args))),
+        unit_struct_parser("Empty", ()),
+        tuple_struct_parser("Delimited", field(delim_args), discard),
         struct_parser(
             "Delimited",
             tuple((struct_field("eq_span", span), struct_field("expr", expr))),
@@ -264,8 +294,8 @@ fn attr_args(input: &str) -> IResult<&str, ()> {
 
 fn safety(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Unsafe"), parend(span))),
-        value((), preceded(spaced_tag("Safe"), parend(span))),
+        tuple_struct_parser("Unsafe", field(span), discard),
+        tuple_struct_parser("Safe", field(span), discard),
         value((), spaced_tag("Default")),
     ))(input)
 }
@@ -296,18 +326,9 @@ fn path_segment(input: &str) -> IResult<&str, ()> {
 
 fn generic_args(input: &str) -> IResult<&str, ()> {
     alt((
-        value(
-            (),
-            preceded(spaced_tag("AngleBracketed"), parend(angle_bracketed_args)),
-        ),
-        value(
-            (),
-            preceded(spaced_tag("Parenthesized"), parend(parenthesized_args)),
-        ),
-        value(
-            (),
-            preceded(spaced_tag("ParenthesizedElided"), parend(span)),
-        ),
+        tuple_struct_parser("AngleBracketed", field(angle_bracketed_args), discard),
+        tuple_struct_parser("Parenthesized", field(parenthesized_args), discard),
+        tuple_struct_parser("ParenthesizedElided", field(span), discard),
     ))(input)
 }
 
@@ -337,11 +358,8 @@ fn angle_bracketed_args(input: &str) -> IResult<&str, ()> {
 
 fn angle_bracketed_arg(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Arg"), parend(generic_arg))),
-        value(
-            (),
-            preceded(spaced_tag("Constraint"), parend(assoc_item_constraint)),
-        ),
+        tuple_struct_parser("Arg", field(generic_arg), discard),
+        tuple_struct_parser("Constraint", field(assoc_item_constraint), discard),
     ))(input)
 }
 
@@ -359,11 +377,29 @@ fn assoc_item_constraint(input: &str) -> IResult<&str, ()> {
     )(input)
 }
 
+fn assoc_item_constraint_kind(input: &str) -> IResult<&str, ()> {
+    alt((
+        struct_parser("Equality", struct_field("term", term), discard),
+        struct_parser(
+            "Bound",
+            struct_field("bounds", list(generic_bound)),
+            discard,
+        ),
+    ))(input)
+}
+
+fn term(input: &str) -> IResult<&str, ()> {
+    alt((
+        tuple_struct_parser("Ty", field(ty), discard),
+        tuple_struct_parser("Const", field(anon_const), discard),
+    ))(input)
+}
+
 fn generic_arg(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Lifetime"), parend(lifetime))),
-        value((), preceded(spaced_tag("Type"), parend(ty))),
-        value((), preceded(spaced_tag("Const"), parend(anon_const))),
+        tuple_struct_parser("Lifetime", field(lifetime), discard),
+        tuple_struct_parser("Type", field(ty), discard),
+        tuple_struct_parser("Const", field(anon_const), discard),
     ))(input)
 }
 
@@ -393,73 +429,40 @@ fn ty(input: &str) -> IResult<&str, ()> {
 
 fn ty_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Slice"), parend(ty))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Array"),
-                parend(separated_pair(ty, spaced_tag(","), anon_const)),
-            ),
+        tuple_struct_parser("Slice", field(ty), discard),
+        tuple_struct_parser("Array", tuple((field(ty), field(anon_const))), discard),
+        tuple_struct_parser("Ptr", field(mut_ty), discard),
+        tuple_struct_parser(
+            "Ref",
+            tuple((field(option(lifetime)), field(mut_ty))),
+            discard,
         ),
-        value((), preceded(spaced_tag("Ptr"), parend(mut_ty))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Ref"),
-                parend(separated_pair(option(lifetime), spaced_tag(","), mut_ty)),
-            ),
+        tuple_struct_parser(
+            "PinnedRef",
+            tuple((field(option(lifetime)), field(mut_ty))),
+            discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("PinnedRef"),
-                parend(separated_pair(option(lifetime), spaced_tag(","), mut_ty)),
-            ),
+        tuple_struct_parser("BareFn", field(bare_fn_ty), discard),
+        tuple_struct_parser("UnsafeBinder", field(unsafe_binder_ty), discard),
+        unit_struct_parser("Never", ()),
+        tuple_struct_parser("Tup", field(list(ty)), discard),
+        tuple_struct_parser("Path", tuple((field(option(q_self)), field(path))), discard),
+        tuple_struct_parser(
+            "TraitObject",
+            tuple((field(list(generic_bound)), field(trait_object_syntax))),
+            discard,
         ),
-        value((), preceded(spaced_tag("BareFn"), parend(bare_fn_ty))),
-        value(
-            (),
-            preceded(spaced_tag("UnsafeBinder"), parend(unsafe_binder_ty)),
+        tuple_struct_parser(
+            "ImplTrait",
+            tuple((field(node_id), field(list(generic_bound)))),
+            discard,
         ),
-        value((), spaced_tag("Never")),
-        value((), preceded(spaced_tag("Tup"), parend(list(ty)))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Path"),
-                parend(separated_pair(option(q_self), spaced_tag(","), path)),
-            ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("TraitObject"),
-                parend(separated_pair(
-                    list(generic_bound),
-                    spaced_tag(","),
-                    trait_object_syntax,
-                )),
-            ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("ImplTrait"),
-                parend(separated_pair(node_id, spaced_tag(","), generic_bounds)),
-            ),
-        ),
-        value((), preceded(spaced_tag("Paren"), parend(ty))),
-        value((), spaced_tag("Infer")),
-        value((), spaced_tag("ImplicitSelf")),
-        value((), spaced_tag("CVarArgs")),
-        value(
-            (),
-            preceded(
-                spaced_tag("Pat"),
-                parend(separated_pair(ty, spaced_tag(","), pat)),
-            ),
-        ),
-        value((), spaced_tag("Dummy")),
+        tuple_struct_parser("Paren", field(ty), discard),
+        unit_struct_parser("Infer", ()),
+        unit_struct_parser("ImplicitSelf", ()),
+        unit_struct_parser("CVarArgs", ()),
+        tuple_struct_parser("Pat", tuple((field(ty), field(pat))), discard),
+        unit_struct_parser("Dummy", ()),
     ))(input)
 }
 
@@ -487,84 +490,34 @@ fn expr(input: &str) -> IResult<&str, ()> {
 
 fn expr_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Array"), parend(list(expr)))),
-        value((), preceded(spaced_tag("ConstBlock"), parend(anon_const))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Call"),
-                parend(separated_pair(expr, spaced_tag(","), list(expr))),
-            ),
+        tuple_struct_parser("Array", field(list(expr)), discard),
+        tuple_struct_parser("ConstBlock", field(anon_const), discard),
+        tuple_struct_parser("Call", tuple((field(expr), field(list(expr)))), discard),
+        tuple_struct_parser("MethodCall", field(method_call), discard),
+        tuple_struct_parser("Tup", field(list(expr)), discard),
+        tuple_struct_parser(
+            "Binary",
+            tuple((field(bin_op), field(expr), field(expr))),
+            discard,
         ),
-        value((), preceded(spaced_tag("MethodCall"), parend(method_call))),
-        value((), preceded(spaced_tag("Tup"), parend(list(expr)))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Binary"),
-                parend(tuple((
-                    bin_op,
-                    spaced_tag(","),
-                    expr,
-                    spaced_tag(","),
-                    expr,
-                ))),
-            ),
+        tuple_struct_parser("UnOp", tuple((field(un_op), field(expr))), discard),
+        tuple_struct_parser("Lit", field(lit), discard),
+        tuple_struct_parser("Cast", tuple((field(expr), field(ty))), discard),
+        tuple_struct_parser("Type", tuple((field(expr), field(ty))), discard),
+        tuple_struct_parser(
+            "Let",
+            tuple((field(pat), field(expr), field(span))),
+            discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("UnOp"),
-                parend(separated_pair(un_op, spaced_tag(","), expr)),
-            ),
+        tuple_struct_parser(
+            "If",
+            tuple((field(expr), field(block), field(option(expr)))),
+            discard,
         ),
-        value((), preceded(spaced_tag("Lit"), parend(lit))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Cast"),
-                parend(separated_pair(expr, spaced_tag(","), ty)),
-            ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Type"),
-                parend(separated_pair(expr, spaced_tag(","), ty)),
-            ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Let"),
-                parend(tuple((pat, spaced_tag(","), expr, spaced_tag(","), span))),
-            ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("If"),
-                parend(tuple((
-                    expr,
-                    spaced_tag(","),
-                    block,
-                    spaced_tag(","),
-                    option(expr),
-                ))),
-            ),
-        ),
-        value(
-            (),
-            preceded(
-                spaced_tag("While"),
-                parend(tuple((
-                    expr,
-                    spaced_tag(","),
-                    block,
-                    spaced_tag(","),
-                    option(label),
-                ))),
-            ),
+        tuple_struct_parser(
+            "While",
+            tuple((field(expr), field(block), field(option(label)))),
+            discard,
         ),
         struct_parser(
             "ForLoop",
@@ -577,180 +530,90 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
             )),
             discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Loop"),
-                parend(tuple((
-                    block,
-                    spaced_tag(","),
-                    option(label),
-                    spaced_tag(","),
-                    span,
-                ))),
-            ),
+        tuple_struct_parser(
+            "Loop",
+            tuple((field(block), field(option(label)), field(span))),
+            discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Match"),
-                parend(tuple((
-                    expr,
-                    spaced_tag(","),
-                    list(arm),
-                    spaced_tag(","),
-                    match_kind,
-                ))),
-            ),
+        tuple_struct_parser(
+            "Match",
+            tuple((field(expr), field(list(arm)), field(match_kind))),
+            discard,
         ),
-        value((), preceded(spaced_tag("Closure"), parend(closure))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Block"),
-                parend(separated_pair(block, spaced_tag(","), option(label))),
-            ),
+        tuple_struct_parser("Closure", field(closure), discard),
+        tuple_struct_parser(
+            "Block",
+            tuple((field(block), field(option(label)))),
+            discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Gen"),
-                parend(tuple((
-                    capture_by,
-                    spaced_tag(","),
-                    block,
-                    spaced_tag(","),
-                    gen_block_kind,
-                    spaced_tag(","),
-                    span,
-                ))),
-            ),
+        tuple_struct_parser(
+            "Gen",
+            tuple((
+                field(capture_by),
+                field(block),
+                field(gen_block_kind),
+                field(span),
+            )),
+            discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Await"),
-                parend(separated_pair(expr, spaced_tag(","), span)),
-            ),
-        ),
+        tuple_struct_parser("Await", tuple((field(expr), field(span))), discard),
         alt((
-            value((), preceded(spaced_tag("TryBlock"), parend(block))),
-            value(
-                (),
-                preceded(
-                    spaced_tag("Assign"),
-                    parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
-                ),
+            tuple_struct_parser("TryBlock", field(block), discard),
+            tuple_struct_parser(
+                "Assign",
+                tuple((field(expr), field(expr), field(span))),
+                discard,
             ),
-            value(
-                (),
-                preceded(
-                    spaced_tag("AssignOp"),
-                    parend(tuple((
-                        bin_op,
-                        spaced_tag(","),
-                        expr,
-                        spaced_tag(","),
-                        expr,
-                    ))),
-                ),
+            tuple_struct_parser(
+                "AssignOp",
+                tuple((field(bin_op), field(expr), field(expr))),
+                discard,
             ),
-            value(
-                (),
-                preceded(
-                    spaced_tag("Field"),
-                    parend(separated_pair(expr, spaced_tag(","), ident)),
-                ),
+            tuple_struct_parser("Field", tuple((field(expr), field(ident))), discard),
+            tuple_struct_parser(
+                "Index",
+                tuple((field(expr), field(expr), field(span))),
+                discard,
             ),
-            value(
-                (),
-                preceded(
-                    spaced_tag("Index"),
-                    parend(tuple((expr, spaced_tag(","), expr, spaced_tag(","), span))),
-                ),
+            tuple_struct_parser(
+                "Range",
+                tuple((
+                    field(option(expr)),
+                    field(option(expr)),
+                    field(range_limits),
+                )),
+                discard,
             ),
-            value(
-                (),
-                preceded(
-                    spaced_tag("Range"),
-                    parend(tuple((
-                        option(expr),
-                        spaced_tag(","),
-                        option(expr),
-                        spaced_tag(","),
-                        range_limits,
-                    ))),
-                ),
+            unit_struct_parser("Underscore", ()),
+            tuple_struct_parser("Path", tuple((field(option(q_self)), field(path))), discard),
+            tuple_struct_parser(
+                "AddrOf",
+                tuple((field(borrow_kind), field(mutability), field(expr))),
+                discard,
             ),
-            value((), spaced_tag("Underscore")),
-            value(
-                (),
-                preceded(
-                    spaced_tag("Path"),
-                    parend(separated_pair(option(q_self), spaced_tag(","), path)),
-                ),
-            ),
-            value(
-                (),
-                preceded(
-                    spaced_tag("AddrOf"),
-                    parend(tuple((
-                        borrow_kind,
-                        spaced_tag(","),
-                        mutability,
-                        spaced_tag(","),
-                        expr,
-                    ))),
-                ),
-            ),
-            value(
-                (),
-                preceded(
-                    spaced_tag("Break"),
-                    parend(separated_pair(option(label), spaced_tag(","), expr)),
-                ),
-            ),
-            value((), preceded(spaced_tag("Continue"), parend(option(label)))),
-            value((), preceded(spaced_tag("InlineAsm"), parend(inline_asm))),
-            value(
-                (),
-                preceded(
-                    spaced_tag("OffsetOf"),
-                    parend(separated_pair(ty, spaced_tag(","), list(ident))),
-                ),
-            ),
-            value((), preceded(spaced_tag("Struct"), parend(struct_expr))),
-            value(
-                (),
-                preceded(
-                    spaced_tag("Repeat"),
-                    parend(separated_pair(expr, spaced_tag(","), anon_const)),
-                ),
-            ),
-            value((), preceded(spaced_tag("Paren"), parend(expr))),
-            value((), preceded(spaced_tag("Try"), parend(expr))),
-            value((), preceded(spaced_tag("Yield"), parend(option(expr)))),
-            value((), preceded(spaced_tag("Yeet"), parend(option(expr)))),
-            value((), preceded(spaced_tag("Become"), parend(expr))),
+            tuple_struct_parser("Break", tuple((field(option(label)), field(expr))), discard),
+            tuple_struct_parser("Continue", field(option(label)), discard),
+            tuple_struct_parser("InlineAsm", field(inline_asm), discard),
+            tuple_struct_parser("OffsetOf", tuple((field(ty), field(list(ident)))), discard),
+            tuple_struct_parser("Struct", field(struct_expr), discard),
+            tuple_struct_parser("Repeat", tuple((field(expr), field(anon_const))), discard),
+            tuple_struct_parser("Paren", field(expr), discard),
+            tuple_struct_parser("Try", field(expr), discard),
+            tuple_struct_parser("Yield", field(option(expr)), discard),
+            tuple_struct_parser("Yeet", field(option(expr)), discard),
+            tuple_struct_parser("Become", field(expr), discard),
             alt((
-                value(
-                    (),
-                    preceded(spaced_tag("FormatArgs"), parend(parse_format_args)),
+                tuple_struct_parser("FormatArgs", field(parse_format_args), discard),
+                tuple_struct_parser(
+                    "UnsafeBinderCast",
+                    tuple((
+                        field(unsafe_binder_cast_kind),
+                        field(expr),
+                        field(option(ty)),
+                    )),
+                    discard,
                 ),
-                value(
-                    (),
-                    preceded(
-                        spaced_tag("UnsafeBinderCast"),
-                        parend(tuple((
-                            unsafe_binder_cast_kind,
-                            spaced_tag(","),
-                            expr,
-                            spaced_tag(","),
-                            option(ty),
-                        ))),
-                    ),
-                ),
-                value((), spaced_tag("Dummy")),
+                unit_struct_parser("Dummy", ()),
             )),
         )),
     ))(input)
@@ -765,7 +628,7 @@ fn parse_format_args(input: &str) -> IResult<&str, ()> {
             struct_field("arguments", format_arguments),
             struct_field(
                 "uncooked_fmt_str",
-                parend(separated_pair(lit_kind, spaced_tag(","), spaced_string)),
+                tuple_parser(tuple((field(lit_kind), field(spaced_string)))),
             ),
         )),
         discard,
@@ -780,10 +643,6 @@ fn format_arguments(input: &str) -> IResult<&str, ()> {
             struct_field("num_unnamed_args", complete::u64),
             struct_field("num_explicit_args", complete::u64),
             struct_field("names", hashmap(spaced_string, complete::u64)),
-            struct_field(
-                "uncooked_fmt_str",
-                parend(separated_pair(lit_kind, spaced_tag(","), spaced_string)),
-            ),
         )),
         discard,
     )(input)
@@ -802,19 +661,16 @@ fn format_argument(input: &str) -> IResult<&str, ()> {
 
 fn format_argument_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Normal")),
-        value((), preceded(spaced_tag("Named"), parend(ident))),
-        value((), preceded(spaced_tag("captured"), parend(ident))),
+        unit_struct_parser("Normal", ()),
+        tuple_struct_parser("Named", field(ident), discard),
+        tuple_struct_parser("captured", field(ident), discard),
     ))(input)
 }
 
 fn format_args_piece(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Literal"), parend(spaced_string))),
-        value(
-            (),
-            preceded(spaced_tag("Placeholder"), parend(format_placeholder)),
-        ),
+        tuple_struct_parser("Literal", field(spaced_string), discard),
+        tuple_struct_parser("Placeholder", field(format_placeholder), discard),
     ))(input)
 }
 
@@ -857,11 +713,8 @@ fn format_options(input: &str) -> IResult<&str, ()> {
 
 fn format_count(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Literal"), parend(complete::u64))),
-        value(
-            (),
-            preceded(spaced_tag("Argument"), parend(format_arg_position)),
-        ),
+        tuple_struct_parser("Literal", field(complete::u64), discard),
+        tuple_struct_parser("Argument", field(format_arg_position), discard),
     ))(input)
 }
 
@@ -938,9 +791,9 @@ fn struct_expr(input: &str) -> IResult<&str, ()> {
 
 fn struct_rest(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Base"), parend(expr))),
-        value((), preceded(spaced_tag("Rest"), parend(span))),
-        value((), spaced_tag("None")),
+        tuple_struct_parser("Base", field(expr), discard),
+        tuple_struct_parser("Rest", field(span), discard),
+        unit_struct_parser("None", ()),
     ))(input)
 }
 
@@ -1007,8 +860,8 @@ fn fn_decl(input: &str) -> IResult<&str, ()> {
 
 fn fn_ret_ty(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Default"), parend(span))),
-        value((), preceded(spaced_tag("Ty"), parend(ty))),
+        tuple_struct_parser("Default", field(span), discard),
+        tuple_struct_parser("Ty", field(ty), discard),
     ))(input)
 }
 
@@ -1065,21 +918,21 @@ fn coroutine_kind(input: &str) -> IResult<&str, ()> {
 
 fn parse_const(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("No")),
-        value((), preceded(spaced_tag("Yes"), parend(span))),
+        unit_struct_parser("No", ()),
+        tuple_struct_parser("Yes", field(span), discard),
     ))(input)
 }
 
 fn capture_by(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Ref")),
+        unit_struct_parser("Ref", ()),
         struct_parser("Value", struct_field("move_kw", span), discard),
     ))(input)
 }
 
 fn closure_binder(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("NotPresent")),
+        unit_struct_parser("NotPresent", ()),
         struct_parser(
             "NotPresent",
             tuple((
@@ -1109,7 +962,7 @@ fn generic_param(input: &str) -> IResult<&str, ()> {
 
 fn generic_param_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Lifetime")),
+        unit_struct_parser("Lifetime", ()),
         struct_parser("Type", struct_field("default", option(ty)), discard),
         struct_parser(
             "Const",
@@ -1125,32 +978,20 @@ fn generic_param_kind(input: &str) -> IResult<&str, ()> {
 
 fn generic_bound(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Trait"), parend(poly_trait_ref))),
-        value((), preceded(spaced_tag("Outlives"), parend(lifetime))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Use"),
-                parend(separated_pair(
-                    list(precise_capturing_arg),
-                    spaced_tag(","),
-                    span,
-                )),
-            ),
+        tuple_struct_parser("Trait", field(poly_trait_ref), discard),
+        tuple_struct_parser("Outlives", field(lifetime), discard),
+        tuple_struct_parser(
+            "Use",
+            tuple((field(list(precise_capturing_arg)), field(span))),
+            discard,
         ),
     ))(input)
 }
 
 fn precise_capturing_arg(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Lifetime"), parend(lifetime))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Arg"),
-                parend(separated_pair(path, spaced_tag(","), node_id)),
-            ),
-        ),
+        tuple_struct_parser("Lifetime", field(lifetime), discard),
+        tuple_struct_parser("Arg", tuple((field(path), field(node_id))), discard),
     ))(input)
 }
 
@@ -1181,24 +1022,24 @@ fn trait_bound_modifiers(input: &str) -> IResult<&str, ()> {
 
 fn bound_constness(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Never")),
-        value((), preceded(spaced_tag("Always"), parend(span))),
-        value((), preceded(spaced_tag("Maybe"), parend(span))),
+        unit_struct_parser("Never", ()),
+        tuple_struct_parser("Always", field(span), discard),
+        tuple_struct_parser("Maybe", field(span), discard),
     ))(input)
 }
 
 fn bound_asyncness(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Normal")),
-        value((), preceded(spaced_tag("Async"), parend(span))),
+        unit_struct_parser("Normal", ()),
+        tuple_struct_parser("Async", field(span), discard),
     ))(input)
 }
 
 fn bound_polarity(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Positive")),
-        value((), preceded(spaced_tag("Negative"), parend(span))),
-        value((), preceded(spaced_tag("Maybe"), parend(span))),
+        unit_struct_parser("Positive", ()),
+        tuple_struct_parser("Negative", field(span), discard),
+        tuple_struct_parser("Maybe", field(span), discard),
     ))(input)
 }
 
@@ -1303,17 +1144,17 @@ fn lit(input: &str) -> IResult<&str, ()> {
 
 fn lit_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Bool")),
-        value((), spaced_tag("Byte")),
-        value((), spaced_tag("Char")),
-        value((), spaced_tag("Integer")),
-        value((), spaced_tag("Float")),
-        value((), spaced_tag("Str")),
-        value((), preceded(spaced_tag("StrRaw"), parend(complete::u8))),
-        value((), spaced_tag("ByteStr")),
-        value((), preceded(spaced_tag("ByteStrRaw"), parend(complete::u8))),
-        value((), spaced_tag("CStr")),
-        value((), preceded(spaced_tag("CStrRaw"), parend(complete::u8))),
+        unit_struct_parser("Bool", ()),
+        unit_struct_parser("Byte", ()),
+        unit_struct_parser("Char", ()),
+        unit_struct_parser("Integer", ()),
+        unit_struct_parser("Float", ()),
+        unit_struct_parser("Str", ()),
+        tuple_struct_parser("StrRaw", field(complete::u8), discard),
+        unit_struct_parser("ByteStr", ()),
+        tuple_struct_parser("ByteStrRaw", field(complete::u8), discard),
+        unit_struct_parser("CStr", ()),
+        tuple_struct_parser("CStrRaw", field(complete::u8), discard),
     ))(input)
 }
 
@@ -1332,108 +1173,63 @@ fn pat(input: &str) -> IResult<&str, ()> {
 
 fn pat_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Wild")),
-        value(
-            (),
-            preceded(
-                spaced_tag("Ident"),
-                parend(tuple((
-                    binding_mode,
-                    spaced_tag(","),
-                    ident,
-                    spaced_tag(","),
-                    option(pat),
-                ))),
-            ),
+        unit_struct_parser("Wild", ()),
+        tuple_struct_parser(
+            "Ident",
+            tuple((field(binding_mode), field(ident), field(option(pat)))),
+            discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Struct"),
-                parend(tuple((
-                    option(q_self),
-                    spaced_tag(","),
-                    path,
-                    spaced_tag(","),
-                    list(pat_field),
-                    spaced_tag(","),
-                    pat_fields_rest,
-                ))),
-            ),
+        tuple_struct_parser(
+            "Struct",
+            tuple((
+                field(option(q_self)),
+                field(path),
+                field(list(pat_field)),
+                field(pat_fields_rest),
+            )),
+            discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("TupleStruct"),
-                parend(tuple((
-                    option(q_self),
-                    spaced_tag(","),
-                    path,
-                    spaced_tag(","),
-                    list(pat),
-                ))),
-            ),
+        tuple_struct_parser(
+            "TupleStruct",
+            tuple((field(option(q_self)), field(path), field(list(pat)))),
+            discard,
         ),
-        value((), preceded(spaced_tag("Or"), parend(list(pat)))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Path"),
-                parend(separated_pair(option(q_self), spaced_tag(","), path)),
-            ),
+        tuple_struct_parser("Or", field(list(pat)), discard),
+        tuple_struct_parser("Path", tuple((field(option(q_self)), field(path))), discard),
+        tuple_struct_parser("Tuple", field(list(pat)), discard),
+        tuple_struct_parser("Box", field(pat), discard),
+        tuple_struct_parser("Deref", field(pat), discard),
+        tuple_struct_parser("Ref", tuple((field(pat), field(mutability))), discard),
+        tuple_struct_parser("Expr", field(expr), discard),
+        tuple_struct_parser(
+            "Range",
+            tuple((
+                field(option(expr)),
+                field(option(expr)),
+                field(spanned_range_end),
+            )),
+            discard,
         ),
-        value((), preceded(spaced_tag("Tuple"), parend(list(pat)))),
-        value((), preceded(spaced_tag("Box"), parend(pat))),
-        value((), preceded(spaced_tag("Deref"), parend(pat))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Ref"),
-                parend(separated_pair(pat, spaced_tag(","), mutability)),
-            ),
-        ),
-        value((), preceded(spaced_tag("Expr"), parend(expr))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Range"),
-                parend(tuple((
-                    option(expr),
-                    spaced_tag(","),
-                    option(expr),
-                    spaced_tag(","),
-                    spanned_range_end,
-                ))),
-            ),
-        ),
-        value((), preceded(spaced_tag("Slice"), parend(list(pat)))),
-        value((), spaced_tag("Rest")),
-        value((), spaced_tag("Never")),
-        value(
-            (),
-            preceded(
-                spaced_tag("Guard"),
-                parend(separated_pair(pat, spaced_tag(","), expr)),
-            ),
-        ),
-        value((), preceded(spaced_tag("Paren"), parend(pat))),
+        tuple_struct_parser("Slice", field(list(pat)), discard),
+        unit_struct_parser("Rest", ()),
+        unit_struct_parser("Never", ()),
+        tuple_struct_parser("Guard", tuple((field(pat), field(expr))), discard),
+        tuple_struct_parser("Paren", field(pat), discard),
     ))(input)
 }
 
 fn binding_mode(input: &str) -> IResult<&str, ()> {
-    value(
-        (),
-        preceded(
-            spaced_tag("BindingMode"),
-            parend(separated_pair(by_ref, spaced_tag(","), mutability)),
-        ),
+    tuple_struct_parser(
+        "BindingMode",
+        tuple((field(by_ref), field(mutability))),
+        discard,
     )(input)
 }
 
 fn by_ref(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Yes"), parend(mutability))),
-        value((), spaced_tag("No")),
+        tuple_struct_parser("Yes", field(mutability), discard),
+        unit_struct_parser("No", ()),
     ))(input)
 }
 
@@ -1483,8 +1279,8 @@ fn spanned_range_end(input: &str) -> IResult<&str, ()> {
 
 fn range_end(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Included"), parend(range_syntax))),
-        value((), spaced_tag("Excluded")),
+        tuple_struct_parser("Included", field(range_syntax), discard),
+        unit_struct_parser("Excluded", ()),
     ))(input)
 }
 
@@ -1500,8 +1296,8 @@ enum CommentKind {
 
 fn comment_kind(input: &str) -> IResult<&str, CommentKind> {
     alt((
-        value(CommentKind::Line, spaced_tag("Line")),
-        value(CommentKind::Block, spaced_tag("Block")),
+        unit_struct_parser("Line", CommentKind::Line),
+        unit_struct_parser("Block", CommentKind::Block),
     ))(input)
 }
 
@@ -1618,68 +1414,40 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
     alt((
         map(
             alt((
-                map(preceded(spaced_tag("Fn"), parend(parse_fn)), ItemKind::Fn),
-                map(
-                    preceded(spaced_tag("Mod"), parend(parse_mod)),
-                    ItemKind::Mod,
-                ),
-                map(
-                    preceded(spaced_tag("Trait"), parend(parse_trait)),
-                    ItemKind::Trait,
-                ),
-                map(
-                    preceded(spaced_tag("Impl"), parend(parse_impl)),
-                    ItemKind::Impl,
-                ),
+                tuple_struct_parser("Fn", field(parse_fn), ItemKind::Fn),
+                tuple_struct_parser("Mod", field(parse_mod), ItemKind::Mod),
+                tuple_struct_parser("Trait", field(parse_trait), ItemKind::Trait),
+                tuple_struct_parser("Impl", field(parse_impl), ItemKind::Impl),
             )),
             Some,
         ),
         map(
             alt((
-                value(
-                    (),
-                    preceded(spaced_tag("ExternCrate"), parend(option(spaced_string))),
+                tuple_struct_parser("ExternCrate", field(option(spaced_string)), discard),
+                tuple_struct_parser("Use", field(use_tree), discard),
+                tuple_struct_parser("Static", field(static_item), discard),
+                tuple_struct_parser("Const", field(const_item), discard),
+                tuple_struct_parser("ForeignMod", field(foreign_mod), discard),
+                tuple_struct_parser("GlobalAsm", field(inline_asm), discard),
+                tuple_struct_parser("TyAlias", field(ty_alias), discard),
+                tuple_struct_parser("Enum", tuple((field(enum_def), field(generics))), discard),
+                tuple_struct_parser(
+                    "Struct",
+                    tuple((field(variant_data), field(generics))),
+                    discard,
                 ),
-                value((), preceded(spaced_tag("Use"), parend(use_tree))),
-                value((), preceded(spaced_tag("Static"), parend(static_item))),
-                value((), preceded(spaced_tag("Const"), parend(const_item))),
-                value((), preceded(spaced_tag("ForeignMod"), parend(foreign_mod))),
-                value((), preceded(spaced_tag("GlobalAsm"), parend(inline_asm))),
-                value((), preceded(spaced_tag("TyAlias"), parend(ty_alias))),
-                value(
-                    (),
-                    preceded(
-                        spaced_tag("Enum"),
-                        parend(separated_pair(enum_def, spaced_tag(","), generics)),
-                    ),
+                tuple_struct_parser(
+                    "Union",
+                    tuple((field(variant_data), field(generics))),
+                    discard,
                 ),
-                value(
-                    (),
-                    preceded(
-                        spaced_tag("Struct"),
-                        parend(separated_pair(variant_data, spaced_tag(","), generics)),
-                    ),
+                tuple_struct_parser(
+                    "TraitAlias",
+                    tuple((field(generics), field(list(generic_bound)))),
+                    discard,
                 ),
-                value(
-                    (),
-                    preceded(
-                        spaced_tag("Union"),
-                        parend(separated_pair(variant_data, spaced_tag(","), generics)),
-                    ),
-                ),
-                value(
-                    (),
-                    preceded(
-                        spaced_tag("TraitAlias"),
-                        parend(separated_pair(
-                            generics,
-                            spaced_tag(","),
-                            list(generic_bound),
-                        )),
-                    ),
-                ),
-                value((), preceded(spaced_tag("MacroDef"), parend(macro_def))),
-                value((), preceded(spaced_tag("Delegation"), parend(parser_todo))),
+                tuple_struct_parser("MacroDef", field(macro_def), discard),
+                tuple_struct_parser("Delegation", field(parser_todo), discard),
             )),
             |_| None,
         ),
@@ -1719,24 +1487,24 @@ fn delim_span(input: &str) -> IResult<&str, ()> {
 
 fn delimiter(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Parenthesis")),
-        value((), spaced_tag("Brace")),
-        value((), spaced_tag("Bracket")),
-        preceded(spaced_tag("Invisible"), parend(invisible_origin)),
+        unit_struct_parser("Parenthesis", ()),
+        unit_struct_parser("Brace", ()),
+        unit_struct_parser("Bracket", ()),
+        tuple_struct_parser("Invisible", field(invisible_origin), discard),
     ))(input)
 }
 
 fn invisible_origin(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("MetaVar"), parend(meta_var_kind))),
-        value((), spaced_tag("ProcMacro")),
-        value((), spaced_tag("FlattenToken")),
+        tuple_struct_parser("MetaVar", field(meta_var_kind), discard),
+        unit_struct_parser("ProcMacro", ()),
+        unit_struct_parser("FlattenToken", ()),
     ))(input)
 }
 
 fn meta_var_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Pat"), parend(nt_pat_kind))),
+        tuple_struct_parser("Pat", field(nt_pat_kind), discard),
         struct_parser(
             "Expr",
             tuple((
@@ -1746,31 +1514,31 @@ fn meta_var_kind(input: &str) -> IResult<&str, ()> {
             )),
             discard,
         ),
-        value((), spaced_tag("Item")),
-        value((), spaced_tag("Block")),
-        value((), spaced_tag("Stmt")),
-        value((), spaced_tag("Ty")),
-        value((), spaced_tag("Ident")),
-        value((), spaced_tag("Lifetime")),
-        value((), spaced_tag("Literal")),
-        value((), spaced_tag("Meta")),
-        value((), spaced_tag("Path")),
-        value((), spaced_tag("Vis")),
-        value((), spaced_tag("TT")),
+        unit_struct_parser("Item", ()),
+        unit_struct_parser("Block", ()),
+        unit_struct_parser("Stmt", ()),
+        unit_struct_parser("Ty", ()),
+        unit_struct_parser("Ident", ()),
+        unit_struct_parser("Lifetime", ()),
+        unit_struct_parser("Literal", ()),
+        unit_struct_parser("Meta", ()),
+        unit_struct_parser("Path", ()),
+        unit_struct_parser("Vis", ()),
+        unit_struct_parser("TT", ()),
     ))(input)
 }
 
 fn nt_expr_kind(input: &str) -> IResult<&str, ()> {
     alt((
         struct_parser("Expr2021", struct_field("inferred", parse_bool), discard),
-        value((), spaced_tag("Expr")),
+        unit_struct_parser("Expr", ()),
     ))(input)
 }
 
 fn nt_pat_kind(input: &str) -> IResult<&str, ()> {
     alt((
         struct_parser("PatParam", struct_field("inferred", parse_bool), discard),
-        value((), spaced_tag("PatWithOr")),
+        unit_struct_parser("PatWithOr", ()),
     ))(input)
 }
 
@@ -1805,14 +1573,12 @@ fn variant_data(input: &str) -> IResult<&str, ()> {
             )),
             discard,
         ),
-        value(
-            (),
-            preceded(
-                spaced_tag("Tuple"),
-                parend(separated_pair(list(field_def), spaced_tag(","), node_id)),
-            ),
+        tuple_struct_parser(
+            "Tuple",
+            tuple((field(list(field_def)), field(node_id))),
+            discard,
         ),
-        value((), preceded(spaced_tag("Unit"), parend(node_id))),
+        tuple_struct_parser("Unit", field(node_id), discard),
     ))(input)
 }
 
@@ -1836,9 +1602,9 @@ fn field_def(input: &str) -> IResult<&str, ()> {
 
 fn foreign_item_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Static"), parend(static_item))),
-        value((), preceded(spaced_tag("Fn"), parend(parse_fn))),
-        value((), preceded(spaced_tag("TyAlias"), parend(ty_alias))),
+        tuple_struct_parser("Static", field(static_item), discard),
+        tuple_struct_parser("Fn", field(parse_fn), discard),
+        tuple_struct_parser("TyAlias", field(ty_alias), discard),
     ))(input)
 }
 
@@ -1898,7 +1664,7 @@ fn use_tree(input: &str) -> IResult<&str, ()> {
 
 fn use_tree_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Simple"), parend(option(ident)))),
+        tuple_struct_parser("Simple", field(option(ident)), discard),
         struct_parser(
             "Nested",
             tuple((
@@ -1910,7 +1676,7 @@ fn use_tree_kind(input: &str) -> IResult<&str, ()> {
             )),
             discard,
         ),
-        value((), spaced_tag("Glob")),
+        unit_struct_parser("Glob", ()),
     ))(input)
 }
 
@@ -1965,15 +1731,9 @@ fn fn_header(input: &str) -> IResult<&str, ()> {
 
 fn parse_extern(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("None")),
-        value((), preceded(spaced_tag("Implicit"), parend(span))),
-        value(
-            (),
-            preceded(
-                spaced_tag("Explicit"),
-                parend(separated_pair(str_lit, spaced_tag(","), span)),
-            ),
-        ),
+        unit_struct_parser("None", ()),
+        tuple_struct_parser("Implicit", field(span), discard),
+        tuple_struct_parser("Explicit", tuple((field(str_lit), field(span))), discard),
     ))(input)
 }
 
@@ -1993,8 +1753,8 @@ fn str_lit(input: &str) -> IResult<&str, ()> {
 
 fn str_style(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Cooked")),
-        value((), preceded(spaced_tag("Raw"), parend(complete::u8))),
+        unit_struct_parser("Cooked", ()),
+        tuple_struct_parser("Raw", field(complete::u8), discard),
     ))(input)
 }
 
@@ -2036,11 +1796,8 @@ fn where_predicate(input: &str) -> IResult<&str, ()> {
 
 fn where_predicate_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        preceded(spaced_tag("BoundPredicate"), parend(where_bound_predicate)),
-        preceded(
-            spaced_tag("RegionPredicate"),
-            parend(where_region_predicate),
-        ),
+        tuple_struct_parser("BoundPredicate", field(where_bound_predicate), discard),
+        tuple_struct_parser("RegionPredicate", field(where_region_predicate), discard),
     ))(input)
 }
 
@@ -2069,8 +1826,8 @@ fn where_region_predicate(input: &str) -> IResult<&str, ()> {
 
 fn defaultness(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Default"), parend(span))),
-        value((), spaced_tag("Final")),
+        tuple_struct_parser("Default", field(span), discard),
+        unit_struct_parser("Final", ()),
     ))(input)
 }
 
@@ -2102,8 +1859,8 @@ fn block(input: &str) -> IResult<&str, Block> {
 
 fn block_check_mode(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Default")),
-        value((), preceded(spaced_tag("Unsafe"), parend(unsafe_source))),
+        unit_struct_parser("Default", ()),
+        tuple_struct_parser("Unsafe", field(unsafe_source), discard),
     ))(input)
 }
 
@@ -2125,11 +1882,11 @@ fn stmt(input: &str) -> IResult<&str, ()> {
 
 fn stmt_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), preceded(spaced_tag("Let"), parend(local))),
-        value((), preceded(spaced_tag("Item"), parend(item))),
-        value((), preceded(spaced_tag("Expr"), parend(expr))),
-        value((), preceded(spaced_tag("Semi"), parend(expr))),
-        value((), spaced_tag("Empty")),
+        tuple_struct_parser("Let", field(local), discard),
+        tuple_struct_parser("Item", field(item), discard),
+        tuple_struct_parser("Expr", field(expr), discard),
+        tuple_struct_parser("Semi", field(expr), discard),
+        unit_struct_parser("Empty", ()),
     ))(input)
 }
 
@@ -2152,15 +1909,9 @@ fn local(input: &str) -> IResult<&str, ()> {
 
 fn local_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Decl")),
-        value((), preceded(spaced_tag("Init"), parend(expr))),
-        value(
-            (),
-            preceded(
-                spaced_tag("InitElse"),
-                parend(separated_pair(expr, spaced_tag(","), block)),
-            ),
-        ),
+        unit_struct_parser("Decl", ()),
+        tuple_struct_parser("Init", field(expr), discard),
+        tuple_struct_parser("InitElse", tuple((field(expr), field(block))), discard),
     ))(input)
 }
 
@@ -2177,20 +1928,15 @@ impl<'a> Mod<'a> {
 }
 
 fn parse_mod(input: &str) -> IResult<&str, Mod> {
-    map(
-        preceded(
-            spaced_tag("Loaded"),
-            parend(tuple((
-                list(item),
-                spaced_tag(","),
-                inline,
-                spaced_tag(","),
-                modspans,
-                spaced_tag(","),
-                result(unit, unit),
-            ))),
-        ),
-        |(items, _, _, _, span, _, _)| Mod::new(items, span),
+    tuple_struct_parser(
+        "Loaded",
+        tuple((
+            field(list(item)),
+            field(inline),
+            field(modspans),
+            field(result(unit, unit)),
+        )),
+        |(items, _, span, _)| Mod::new(items, span),
     )(input)
 }
 
@@ -2269,14 +2015,14 @@ fn assoc_item(input: &str) -> IResult<&str, AssocItem> {
 
 fn assoc_item_kind<'a>(input: &'a str) -> IResult<&'a str, Option<Fn<'a>>> {
     alt((
-        map(preceded(spaced_tag("Fn"), parend(parse_fn)), Some),
+        tuple_struct_parser("Fn", field(parse_fn), Some),
         map(
             alt((
-                preceded(spaced_tag("Const"), parend(const_item)),
-                preceded(spaced_tag("Type"), parend(ty_alias)),
-                preceded(spaced_tag("MacCall"), parend(parser_todo)),
-                preceded(spaced_tag("Delegation"), parend(parser_todo)),
-                preceded(spaced_tag("DelegationMac"), parend(parser_todo)),
+                tuple_struct_parser("Const", field(const_item), discard),
+                tuple_struct_parser("Type", field(ty_alias), discard),
+                tuple_struct_parser("MacCall", field(parser_todo), discard),
+                tuple_struct_parser("Delegation", field(parser_todo), discard),
+                tuple_struct_parser("DelegationMac", field(parser_todo), discard),
             )),
             |_| None,
         ),
@@ -2363,7 +2109,7 @@ fn parse_impl(input: &str) -> IResult<&str, Impl> {
 
 fn impl_polarity(input: &str) -> IResult<&str, ()> {
     alt((
-        value((), spaced_tag("Positive")),
-        value((), preceded(spaced_tag("Negative"), parend(span))),
+        unit_struct_parser("Positive", ()),
+        tuple_struct_parser("Negative", field(span), discard),
     ))(input)
 }
