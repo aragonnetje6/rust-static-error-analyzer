@@ -10,7 +10,6 @@ use nom::{
 use super::{
     tokens::{
         comment_kind, delim_span, delimiter, lazy_attr_token_stream, lit, lit_kind, token_stream,
-        CommentKind,
     },
     utils::{
         discard, field, hashmap, id, list, option, parend, parse_bool, parser_todo, result, spaced,
@@ -25,13 +24,12 @@ pub fn parse(input: &str) -> IResult<&str, Crate> {
 
 #[derive(Debug, Clone)]
 pub struct Crate<'a> {
-    attrs: Vec<Attribute<'a>>,
     items: Vec<Item<'a>>,
 }
 
 impl<'a> Crate<'a> {
-    fn new(attrs: Vec<Attribute<'a>>, items: Vec<Item<'a>>) -> Self {
-        Self { attrs, items }
+    fn new(items: Vec<Item<'a>>) -> Self {
+        Self { items }
     }
 
     pub(crate) fn find_fn_attrs_for_span(&self, span: &str) -> Option<&[Attribute]> {
@@ -51,7 +49,7 @@ fn krate(input: &str) -> IResult<&str, Crate> {
             struct_field("id", node_id),
             struct_field("is_placeholder", parse_bool),
         )),
-        |(attrs, items, _, _, _)| Crate::new(attrs, items.into_iter().flatten().collect()),
+        |(_, items, _, _, _)| Crate::new(items.into_iter().flatten().collect()),
     )(input)
 }
 
@@ -62,16 +60,15 @@ fn node_id(input: &str) -> IResult<&str, u32> {
 #[derive(Debug, Clone)]
 pub struct Attribute<'a> {
     kind: AttrKind<'a>,
-    span: Span<'a>,
 }
 
 impl<'a> Attribute<'a> {
-    fn new(kind: AttrKind<'a>, span: Span<'a>) -> Self {
-        Self { kind, span }
+    fn new(kind: AttrKind<'a>) -> Self {
+        Self { kind }
     }
 
     pub(crate) fn contains_panic(&self) -> bool {
-        if let AttrKind::DocComment(_, content) = self.kind {
+        if let AttrKind::DocComment(content) = self.kind {
             content.contains("# Panics")
         } else {
             false
@@ -88,7 +85,7 @@ fn attribute(input: &str) -> IResult<&str, Attribute> {
             struct_field("style", attr_style),
             struct_field("span", span),
         )),
-        |(kind, _, _, span)| Attribute::new(kind, span),
+        |(kind, _, _, _)| Attribute::new(kind),
     )(input)
 }
 
@@ -103,7 +100,7 @@ pub(crate) fn attr_style(input: &str) -> IResult<&str, &str> {
 #[derive(Debug, Clone)]
 enum AttrKind<'a> {
     Normal,
-    DocComment(CommentKind, &'a str),
+    DocComment(&'a str),
 }
 
 fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
@@ -112,7 +109,7 @@ fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
         tuple_struct_parser(
             "DocComment",
             tuple((field(comment_kind), field(spaced_string))),
-            |(kind, symbol)| AttrKind::DocComment(kind, symbol),
+            |((), symbol)| AttrKind::DocComment(symbol),
         ),
     ))(input)
 }
@@ -1178,24 +1175,12 @@ fn range_syntax(input: &str) -> IResult<&str, &str> {
 #[derive(Debug, Clone)]
 struct Item<'a> {
     attrs: Vec<Attribute<'a>>,
-    span: Span<'a>,
-    ident: Ident<'a>,
     kind: ItemKind<'a>,
 }
 
 impl<'a> Item<'a> {
-    fn new(
-        attrs: Vec<Attribute<'a>>,
-        span: Span<'a>,
-        ident: Ident<'a>,
-        kind: ItemKind<'a>,
-    ) -> Self {
-        Self {
-            attrs,
-            span,
-            ident,
-            kind,
-        }
+    fn new(attrs: Vec<Attribute<'a>>, kind: ItemKind<'a>) -> Self {
+        Self { attrs, kind }
     }
 
     fn get_fn_attrs_for_span(&self, span: &str) -> Option<&[Attribute]> {
@@ -1229,7 +1214,7 @@ fn item(input: &str) -> IResult<&str, Option<Item>> {
             struct_field("kind", item_kind),
             struct_field("tokens", option(lazy_attr_token_stream)),
         )),
-        |(attrs, _, span, (), ident, kind, _)| Some(Item::new(attrs, span, ident, kind?)),
+        |(attrs, _, _, (), _, kind, _)| Some(Item::new(attrs, kind?)),
     )(input)
 }
 
@@ -1286,11 +1271,8 @@ fn modspans(input: &str) -> IResult<&str, Span> {
     )(input)
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Ident<'a>(&'a str);
-
-pub(crate) fn ident(input: &str) -> IResult<&str, Ident> {
-    map(is_not("),"), Ident)(input)
+pub(crate) fn ident(input: &str) -> IResult<&str, &str> {
+    is_not("),")(input)
 }
 
 #[derive(Debug, Clone)]
@@ -1754,12 +1736,11 @@ fn local_kind(input: &str) -> IResult<&str, ()> {
 #[derive(Debug, Clone)]
 struct Mod<'a> {
     items: Vec<Item<'a>>,
-    span: Span<'a>,
 }
 
 impl<'a> Mod<'a> {
-    fn new(items: Vec<Item<'a>>, span: Span<'a>) -> Self {
-        Self { items, span }
+    fn new(items: Vec<Item<'a>>) -> Self {
+        Self { items }
     }
 }
 
@@ -1772,7 +1753,7 @@ fn parse_mod(input: &str) -> IResult<&str, Mod> {
             field(modspans),
             field(result(unit, unit)),
         )),
-        |(items, _, span, _)| Mod::new(items.into_iter().flatten().collect(), span),
+        |(items, _, _, _)| Mod::new(items.into_iter().flatten().collect()),
     )(input)
 }
 
@@ -1812,24 +1793,12 @@ fn is_auto(input: &str) -> IResult<&str, &str> {
 #[derive(Debug, Clone)]
 struct AssocItem<'a> {
     attrs: Vec<Attribute<'a>>,
-    span: Span<'a>,
-    ident: Ident<'a>,
     assoc_fn: Option<Fn<'a>>,
 }
 
 impl<'a> AssocItem<'a> {
-    fn new(
-        attrs: Vec<Attribute<'a>>,
-        span: Span<'a>,
-        ident: Ident<'a>,
-        assoc_fn: Option<Fn<'a>>,
-    ) -> Self {
-        Self {
-            attrs,
-            span,
-            ident,
-            assoc_fn,
-        }
+    fn new(attrs: Vec<Attribute<'a>>, assoc_fn: Option<Fn<'a>>) -> Self {
+        Self { attrs, assoc_fn }
     }
 
     fn get_fn_attrs_for_span(&self, span: &str) -> Option<&[Attribute<'_>]> {
@@ -1852,7 +1821,7 @@ fn assoc_item(input: &str) -> IResult<&str, AssocItem> {
             struct_field("kind", assoc_item_kind),
             struct_field("tokens", option(lazy_attr_token_stream)),
         )),
-        |(attrs, _, span, (), ident, kind, _)| AssocItem::new(attrs, span, ident, kind),
+        |(attrs, _, _, (), _, kind, _)| AssocItem::new(attrs, kind),
     )(input)
 }
 

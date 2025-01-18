@@ -229,16 +229,10 @@ fn nt_pat_kind(input: &str) -> IResult<&str, ()> {
     ))(input)
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum CommentKind {
-    Line,
-    Block,
-}
-
-pub(crate) fn comment_kind(input: &str) -> IResult<&str, CommentKind> {
+pub(crate) fn comment_kind(input: &str) -> IResult<&str, ()> {
     alt((
-        unit_struct_parser("Line", CommentKind::Line),
-        unit_struct_parser("Block", CommentKind::Block),
+        unit_struct_parser("Line", ()),
+        unit_struct_parser("Block", ()),
     ))(input)
 }
 
