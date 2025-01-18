@@ -299,7 +299,7 @@ mod test {
         token(
 r#"Token{kind:Literal(Lit{kind:Str,symbol:"https://docs.rs/syn/2.0.96",suffix:None,},),span:src/lib.rs:252:24:252:52(#0),},"#,        )
         .unwrap();
-        token(r#"Token { kind: Pound, span: src/lib.rs:252:1: 252:2 (#0) }"#).unwrap();
+        token(r"Token { kind: Pound, span: src/lib.rs:252:1: 252:2 (#0) }").unwrap();
     }
 
     #[test]
@@ -308,7 +308,7 @@ r#"Token{kind:Literal(Lit{kind:Str,symbol:"https://docs.rs/syn/2.0.96",suffix:No
             r#"Token(Token { kind: Literal(Lit { kind: Str, symbol: "https://docs.rs/syn/2.0.96", suffix: None, },),span: src/lib.rs:252:24: 252:52 (#0),},JointHidden,)"#,
         )
         .unwrap();
-        token_tree(r#"Token(Token { kind: Pound, span: src/lib.rs:252:1: 252:2 (#0) }, Joint)"#)
+        token_tree(r"Token(Token { kind: Pound, span: src/lib.rs:252:1: 252:2 (#0) }, Joint)")
             .unwrap();
     }
 

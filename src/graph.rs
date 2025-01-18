@@ -2,6 +2,8 @@ use dot::{Edges, Id, Kind, LabelText, Nodes, Style};
 use rustc_hir::{def_id::DefId, HirId};
 use std::{borrow::Cow, cmp::PartialEq, collections::BTreeSet};
 
+use crate::ast_parser;
+
 #[derive(Debug, Clone)]
 pub struct CallGraph {
     pub nodes: Vec<CallNode>,
@@ -306,6 +308,20 @@ impl CallGraph {
         let mut buf = Vec::new();
         dot::render(self, &mut buf).expect("graph rendering failed");
         String::from_utf8(buf).expect("invalid graph representation")
+    }
+
+    pub(crate) fn attach_panic_info(&mut self, parsed_asts: &[ast_parser::Crate<'_>]) {
+        for node in &mut self.nodes {
+            if let Some(ref span) = node.span {
+                if let Some(attrs) = parsed_asts
+                    .iter()
+                    .find_map(|ast| ast.find_fn_attrs_for_span(span))
+                {
+                    node.panics.doc_section =
+                        attrs.iter().any(ast_parser::Attribute::contains_panic);
+                }
+            }
+        }
     }
 }
 

@@ -1,8 +1,8 @@
 use nom::{
     branch::alt,
     bytes::complete::is_not,
-    character::complete::{self, digit1},
-    combinator::{cut, map, value},
+    character::complete,
+    combinator::{map, value},
     sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult,
 };
@@ -33,6 +33,12 @@ impl<'a> Crate<'a> {
     fn new(attrs: Vec<Attribute<'a>>, items: Vec<Item<'a>>) -> Self {
         Self { attrs, items }
     }
+
+    pub(crate) fn find_fn_attrs_for_span(&self, span: &str) -> Option<&[Attribute]> {
+        self.items
+            .iter()
+            .find_map(|item| item.get_fn_attrs_for_span(span))
+    }
 }
 
 fn krate(input: &str) -> IResult<&str, Crate> {
@@ -54,7 +60,7 @@ fn node_id(input: &str) -> IResult<&str, u32> {
 }
 
 #[derive(Debug, Clone)]
-struct Attribute<'a> {
+pub struct Attribute<'a> {
     kind: AttrKind<'a>,
     span: Span<'a>,
 }
@@ -62,6 +68,14 @@ struct Attribute<'a> {
 impl<'a> Attribute<'a> {
     fn new(kind: AttrKind<'a>, span: Span<'a>) -> Self {
         Self { kind, span }
+    }
+
+    pub(crate) fn contains_panic(&self) -> bool {
+        if let AttrKind::DocComment(_, content) = self.kind {
+            content.contains("# Panics")
+        } else {
+            false
+        }
     }
 }
 
@@ -94,7 +108,7 @@ enum AttrKind<'a> {
 
 fn attr_kind(input: &str) -> IResult<&str, AttrKind> {
     alt((
-        tuple_struct_parser("Normal", field(normal_attr), |_| AttrKind::Normal),
+        tuple_struct_parser("Normal", field(normal_attr), |()| AttrKind::Normal),
         tuple_struct_parser(
             "DocComment",
             tuple((field(comment_kind), field(spaced_string))),
@@ -258,7 +272,7 @@ fn lifetime(input: &str) -> IResult<&str, ()> {
     value(
         (),
         separated_pair(
-            spaced(digit1),
+            spaced(complete::digit1),
             spaced_tag(":"),
             pair(spaced_tag("'"), is_not(")")),
         ),
@@ -376,6 +390,7 @@ fn expr(input: &str) -> IResult<&str, ()> {
     )(input)
 }
 
+#[allow(clippy::too_many_lines)]
 fn expr_kind(input: &str) -> IResult<&str, ()> {
     alt((
         tuple_struct_parser("Array", field(list(expr)), discard),
@@ -537,9 +552,9 @@ fn format_arguments(input: &str) -> IResult<&str, ()> {
         "FormatArguments",
         tuple((
             struct_field("arguments", list(format_argument)),
-            struct_field("num_unnamed_args", spaced(digit1)),
-            struct_field("num_explicit_args", spaced(digit1)),
-            struct_field("names", hashmap(spaced_string, spaced(digit1))),
+            struct_field("num_unnamed_args", spaced(complete::digit1)),
+            struct_field("num_explicit_args", spaced(complete::digit1)),
+            struct_field("names", hashmap(spaced_string, spaced(complete::digit1))),
         )),
         discard,
     )(input)
@@ -610,7 +625,7 @@ fn format_options(input: &str) -> IResult<&str, ()> {
 
 fn format_count(input: &str) -> IResult<&str, ()> {
     alt((
-        tuple_struct_parser("Literal", field(spaced(digit1)), discard),
+        tuple_struct_parser("Literal", field(spaced(complete::digit1)), discard),
         tuple_struct_parser("Argument", field(format_arg_position), discard),
     ))(input)
 }
@@ -649,7 +664,10 @@ fn format_arg_position(input: &str) -> IResult<&str, ()> {
     struct_parser(
         "FormatArgPosition",
         tuple((
-            struct_field("index", result(spaced(digit1), spaced(digit1))),
+            struct_field(
+                "index",
+                result(spaced(complete::digit1), spaced(complete::digit1)),
+            ),
             struct_field("kind", format_arg_position_kind),
             struct_field("span", option(span)),
         )),
@@ -1112,7 +1130,7 @@ fn q_self(input: &str) -> IResult<&str, ()> {
         tuple((
             struct_field("ty", ty),
             struct_field("path_span", span),
-            struct_field("position", spaced(digit1)),
+            struct_field("position", spaced(complete::digit1)),
         )),
         discard,
     )(input)
@@ -1179,6 +1197,24 @@ impl<'a> Item<'a> {
             kind,
         }
     }
+
+    fn get_fn_attrs_for_span(&self, span: &str) -> Option<&[Attribute]> {
+        match &self.kind {
+            ItemKind::Fn(fun) => fun.matches_span(span).then_some(&self.attrs),
+            ItemKind::Mod(module) => module
+                .items
+                .iter()
+                .find_map(|item| item.get_fn_attrs_for_span(span)),
+            ItemKind::Trait(trait_item) => trait_item
+                .items
+                .iter()
+                .find_map(|assoc_item| assoc_item.get_fn_attrs_for_span(span)),
+            ItemKind::Impl(impl_item) => impl_item
+                .items
+                .iter()
+                .find_map(|assoc_item| assoc_item.get_fn_attrs_for_span(span)),
+        }
+    }
 }
 
 fn item(input: &str) -> IResult<&str, Option<Item>> {
@@ -1193,7 +1229,7 @@ fn item(input: &str) -> IResult<&str, Option<Item>> {
             struct_field("kind", item_kind),
             struct_field("tokens", option(lazy_attr_token_stream)),
         )),
-        |(attrs, _, span, _, ident, kind, _)| Some(Item::new(attrs, span, ident, kind?)),
+        |(attrs, _, span, (), ident, kind, _)| Some(Item::new(attrs, span, ident, kind?)),
     )(input)
 }
 
@@ -1229,7 +1265,14 @@ fn visibility_kind(input: &str) -> IResult<&str, ()> {
 pub(crate) struct Span<'a>(&'a str);
 
 pub(crate) fn span(input: &str) -> IResult<&str, Span> {
-    map(is_not(",}"), Span)(input)
+    map(is_not(",}"), |text: &str| {
+        Span(
+            text.trim_start()
+                .rsplit_once(' ')
+                .expect("malformed span")
+                .0,
+        )
+    })(input)
 }
 
 fn modspans(input: &str) -> IResult<&str, Span> {
@@ -1263,9 +1306,11 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
         map(
             alt((
                 tuple_struct_parser("Fn", field(parse_fn), ItemKind::Fn),
-                tuple_struct_parser("Mod", tuple((field(safety), field(parse_mod))), |(_, x)| {
-                    ItemKind::Mod(x)
-                }),
+                tuple_struct_parser(
+                    "Mod",
+                    tuple((field(safety), field(parse_mod))),
+                    |((), x)| ItemKind::Mod(x),
+                ),
                 tuple_struct_parser("Trait", field(parse_trait), ItemKind::Trait),
                 tuple_struct_parser("Impl", field(parse_impl), ItemKind::Impl),
             )),
@@ -1299,7 +1344,7 @@ fn item_kind(input: &str) -> IResult<&str, Option<ItemKind>> {
                 tuple_struct_parser("MacroDef", field(macro_def), discard),
                 tuple_struct_parser("Delegation", field(parser_todo), discard),
             )),
-            |_| None,
+            |()| None,
         ),
     ))(input)
 }
@@ -1474,6 +1519,12 @@ impl<'a> Fn<'a> {
     fn new(body: Option<Block<'a>>) -> Self {
         Self { body }
     }
+
+    fn matches_span(&self, span: &str) -> bool {
+        self.body
+            .as_ref()
+            .is_some_and(|body| span.contains(body.span.0))
+    }
 }
 
 fn parse_fn(input: &str) -> IResult<&str, Fn> {
@@ -1539,7 +1590,7 @@ fn str_lit(input: &str) -> IResult<&str, ()> {
 fn str_style(input: &str) -> IResult<&str, ()> {
     alt((
         unit_struct_parser("Cooked", ()),
-        tuple_struct_parser("Raw", field(spaced(digit1)), discard),
+        tuple_struct_parser("Raw", field(spaced(complete::digit1)), discard),
     ))(input)
 }
 
@@ -1780,6 +1831,13 @@ impl<'a> AssocItem<'a> {
             assoc_fn,
         }
     }
+
+    fn get_fn_attrs_for_span(&self, span: &str) -> Option<&[Attribute<'_>]> {
+        self.assoc_fn
+            .as_ref()
+            .is_some_and(|assoc_fn| assoc_fn.matches_span(span))
+            .then_some(&self.attrs)
+    }
 }
 
 fn assoc_item(input: &str) -> IResult<&str, AssocItem> {
@@ -1847,7 +1905,7 @@ fn ty_alias_where_clauses(input: &str) -> IResult<&str, ()> {
         tuple((
             struct_field("before", ty_alias_where_clause),
             struct_field("after", ty_alias_where_clause),
-            struct_field("split", spaced(digit1)),
+            struct_field("split", spaced(complete::digit1)),
         )),
         discard,
     )(input)

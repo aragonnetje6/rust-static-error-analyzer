@@ -94,32 +94,19 @@ fn main() {
 
     println!("parsing ASTs");
 
-    for ast in asts {
-        match ast_parser::parse(&ast) {
-            Ok(_) => {
-                println!("parsing succeeded");
-            }
-            Err(err) => {
-                std::fs::write(
-                    "error.txt",
-                    match err {
-                        nom::Err::Incomplete(needed) => match needed {
-                            nom::Needed::Unknown => "needed unknown",
-                            nom::Needed::Size(non_zero) => "needed size",
-                        },
-                        nom::Err::Error(x) => x.input,
-                        nom::Err::Failure(x) => x.input,
-                    },
-                );
-                
-            }
-        }
-    }
+    let parsed_asts: Vec<ast_parser::Crate> = asts
+        .iter()
+        .map(|ast| ast_parser::parse(ast).map(|(_, x)| x))
+        .collect::<Result<Vec<ast_parser::Crate>, _>>()
+        .unwrap();
 
-    let call_graph = Arc::into_inner(callbacks.graph)
+    let mut call_graph = Arc::into_inner(callbacks.graph)
         .expect("arc still referenced")
         .into_inner()
         .expect("mutex poisoned");
+
+    call_graph.attach_panic_info(&parsed_asts);
+
     // Parse graph to show chains
     let chain_graph = calls_to_chains::to_chains(&call_graph);
     let dot = if args.call_graph {
