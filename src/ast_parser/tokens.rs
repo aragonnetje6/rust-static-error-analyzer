@@ -291,6 +291,7 @@ fn token_tree(input: &str) -> IResult<&str, ()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
 

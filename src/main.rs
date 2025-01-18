@@ -82,7 +82,7 @@ fn main() {
     }
 
     let mut asts = vec![];
-    if let Some(_) = manifest_info.lib {
+    if manifest_info.lib.is_some() {
         asts.push(cargo_ast(&manifest_path, compiler::LibOrBin::Lib));
     }
     for name in manifest_info.bins {
@@ -97,8 +97,14 @@ fn main() {
     let parsed_asts: Vec<ast_parser::Crate> = asts
         .iter()
         .map(|ast| ast_parser::parse(ast).map(|(_, x)| x))
-        .collect::<Result<Vec<ast_parser::Crate>, _>>()
-        .unwrap();
+        .filter_map(|parse_result| match parse_result {
+            Ok(out) => Some(out),
+            Err(err) => {
+                eprintln!("AST parsing failure: {err}");
+                None
+            }
+        })
+        .collect();
 
     let mut call_graph = Arc::into_inner(callbacks.graph)
         .expect("arc still referenced")

@@ -1536,7 +1536,7 @@ fn parse_fn(input: &str) -> IResult<&str, Fn> {
             struct_field("sig", fn_sig),
             struct_field("body", option(block)),
         )),
-        |(_, _, _, body)| Fn::new(body),
+        |((), (), (), body)| Fn::new(body),
     )(input)
 }
 
@@ -1689,7 +1689,7 @@ fn block(input: &str) -> IResult<&str, Block> {
             struct_field("tokens", option(lazy_attr_token_stream)),
             struct_field("could_be_bare_literal", parse_bool),
         )),
-        |(_, _, _, span, _, _)| Block::new(span),
+        |(_, _, (), span, _, _)| Block::new(span),
     )(input)
 }
 
@@ -1801,7 +1801,7 @@ fn parse_trait(input: &str) -> IResult<&str, Trait> {
             struct_field("bounds", list(generic_bound)),
             struct_field("items", list(assoc_item)),
         )),
-        |(_, _, _, _, items)| Trait::new(items),
+        |((), _, (), _, items)| Trait::new(items),
     )(input)
 }
 
@@ -1852,11 +1852,11 @@ fn assoc_item(input: &str) -> IResult<&str, AssocItem> {
             struct_field("kind", assoc_item_kind),
             struct_field("tokens", option(lazy_attr_token_stream)),
         )),
-        |(attrs, _, span, _, ident, kind, _)| AssocItem::new(attrs, span, ident, kind),
+        |(attrs, _, span, (), ident, kind, _)| AssocItem::new(attrs, span, ident, kind),
     )(input)
 }
 
-fn assoc_item_kind<'a>(input: &'a str) -> IResult<&'a str, Option<Fn<'a>>> {
+fn assoc_item_kind(input: &str) -> IResult<&str, Option<Fn<'_>>> {
     alt((
         tuple_struct_parser("Fn", field(parse_fn), Some),
         map(
@@ -1867,7 +1867,7 @@ fn assoc_item_kind<'a>(input: &'a str) -> IResult<&'a str, Option<Fn<'a>>> {
                 tuple_struct_parser("Delegation", field(parser_todo), discard),
                 tuple_struct_parser("DelegationMac", field(parser_todo), discard),
             )),
-            |_| None,
+            |()| None,
         ),
     ))(input)
 }
@@ -1946,7 +1946,7 @@ fn parse_impl(input: &str) -> IResult<&str, Impl> {
             struct_field("self_ty", ty),
             struct_field("items", list(assoc_item)),
         )),
-        |(_, _, _, _, _, _, _, items)| Impl::new(items),
+        |((), (), (), (), (), _, (), items)| Impl::new(items),
     )(input)
 }
 
@@ -1958,6 +1958,7 @@ fn impl_polarity(input: &str) -> IResult<&str, ()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
 
