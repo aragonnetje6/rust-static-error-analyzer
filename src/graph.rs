@@ -65,7 +65,11 @@ impl PartialOrd for CallEdge {
 
 impl Ord for CallEdge {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.from.cmp(&other.from).then(self.to.cmp(&other.to))
+        self.from
+            .cmp(&other.from)
+            .then(self.to.cmp(&other.to))
+            .then(self.propagates.cmp(&other.propagates))
+            .then(self.is_error.cmp(&other.is_error))
     }
 }
 

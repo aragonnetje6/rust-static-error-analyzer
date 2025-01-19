@@ -62,7 +62,7 @@ fn split_args(command: &str, manifest_info: &ManifestInfo) -> Vec<String> {
         // If this is the path to main.rs, prepend the relative path to the manifest, stripping away Cargo.toml
         for target in manifest_info.bins.iter().chain(&manifest_info.lib) {
             if arg.contains(&target.path) {
-                arg = format!("{}/{arg}", manifest_info.root_path.to_string_lossy());
+                arg = format!("{}/{arg}", &manifest_info.root_path.to_string_lossy());
             }
         }
         temp = match temp {
@@ -176,7 +176,6 @@ pub fn cargo_ast(manifest_path: &Path, lib_or_bin: LibOrBin) -> String {
         LibOrBin::Lib => command.arg("--lib"),
         LibOrBin::Bin(name) => command.arg("--bin").arg(name),
     }
-    .arg("--all-features")
     .arg("--")
     .arg("-Zunpretty=ast-tree,expanded")
     .current_dir(
@@ -270,8 +269,7 @@ pub fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
         name: lib_name,
         path: lib_path,
     });
-    let mut workspace_path = std::path::absolute(manifest_path).expect("directory does not exist");
-    workspace_path.pop();
+    let mut workspace_path = std::path::absolute(root_path).expect("directory does not exist");
     workspace_path.pop();
     workspace_path.push("Cargo.toml");
     let root_path = if std::fs::read_to_string(&workspace_path)
@@ -286,7 +284,7 @@ pub fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
             members
                 .iter()
                 .filter_map(|member| member.as_str())
-                .any(|member| member == package_name)
+                .any(|member| member == root_path.file_name().expect("no name?"))
         }) {
         workspace_path.pop();
         workspace_path
