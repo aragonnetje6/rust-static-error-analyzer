@@ -1,20 +1,20 @@
 use crate::graph::{CallEdge, CallGraph, ChainGraph};
 use std::collections::{hash_map::Entry, HashMap};
 
-pub fn to_chains(graph: &CallGraph) -> ChainGraph {
-    let mut new_graph = ChainGraph::new(graph.crate_name.clone());
+pub fn to_chains(call_graph: &CallGraph) -> ChainGraph {
+    let mut new_graph = ChainGraph::new(call_graph.crate_name.clone());
 
     let mut count: usize = 0;
     let mut max_size: usize = 0;
     let mut total_size: usize = 0;
     let mut max_depth: usize = 0;
     // Loop over all edges (e.g. function calls)
-    for edge in &graph.edges {
+    for edge in &call_graph.edges {
         // Start of a chain
         if edge.is_error && !edge.propagates {
             let mut node_map: HashMap<usize, usize> = HashMap::new();
 
-            let (mut calls, depth) = get_chain_from_edge(graph, edge, &mut vec![], 1);
+            let (mut calls, depth) = get_chain_from_edge(call_graph, edge, &mut vec![], 1);
             calls.push(edge.clone());
 
             count += 1;
@@ -31,16 +31,16 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
                 // If we've already added the node to the new graph, refer to that, otherwise, add a new node
                 let from = match node_map.entry(call.from) {
                     Entry::Occupied(e) => *e.get(),
-                    Entry::Vacant(e) => {
-                        *e.insert(new_graph.add_node_from_call_node(graph.nodes[call.from].clone()))
-                    }
+                    Entry::Vacant(e) => *e.insert(
+                        new_graph.add_node_from_call_node(call_graph.nodes[call.from].clone()),
+                    ),
                 };
                 // Ditto
                 let to = match node_map.entry(call.to) {
                     Entry::Occupied(e) => *e.get(),
-                    Entry::Vacant(e) => {
-                        *e.insert(new_graph.add_node_from_call_node(graph.nodes[call.to].clone()))
-                    }
+                    Entry::Vacant(e) => *e.insert(
+                        new_graph.add_node_from_call_node(call_graph.nodes[call.to].clone()),
+                    ),
                 };
                 // Add the edge
                 new_graph.add_edge(from, to, call.ty);
@@ -48,12 +48,12 @@ pub fn to_chains(graph: &CallGraph) -> ChainGraph {
         }
     }
 
-    let panic_invocations = graph
+    let panic_invocations = call_graph
         .nodes
         .iter()
         .filter(|node| node.panics.explicit_invocation)
         .count();
-    let documented_panics = graph
+    let documented_panics = call_graph
         .nodes
         .iter()
         .filter(|node| node.panics.doc_section)

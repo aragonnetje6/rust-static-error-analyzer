@@ -23,6 +23,7 @@ use graph::CallGraph;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 #[derive(Parser)]
@@ -51,7 +52,7 @@ fn main() {
     let manifest_info = get_manifest_info(&manifest_path);
 
     // Extract the compiler arguments from running `cargo build`
-    let compiler_commands = get_compiler_args(&args.manifest, &manifest_path, &manifest_info);
+    let compiler_commands = get_compiler_args(&manifest_path, &manifest_info);
 
     // Enable CTRL + C
     rustc_driver::install_ctrlc_handler();
@@ -66,6 +67,8 @@ fn main() {
         manifest_info.package_name,
     ))));
     // Run the compiler using the retrieved args.
+    let cwd = std::env::current_dir().expect("cwd invalid");
+    std::env::set_current_dir(manifest_info.root_path).expect("root path invalid");
     if let Some(compiler_command) = compiler_commands.lib_command {
         run_compiler(
             compiler_command,
@@ -80,6 +83,7 @@ fn main() {
             using_internal_features.clone(),
         );
     }
+    std::env::set_current_dir(cwd).expect("failed to reset cwd");
 
     let mut asts = vec![];
     if manifest_info.lib.is_some() {
@@ -92,7 +96,7 @@ fn main() {
         ));
     }
 
-    println!("parsing ASTs");
+    println!("Parsing ASTs...");
 
     let parsed_asts: Vec<ast_parser::Crate> = asts
         .iter()
@@ -100,7 +104,13 @@ fn main() {
         .filter_map(|parse_result| match parse_result {
             Ok(out) => Some(out),
             Err(err) => {
-                eprintln!("AST parsing failure: {err}");
+                eprintln!(
+                    "AST parsing failure: {}",
+                    match err {
+                        nom::Err::Incomplete(_) => "AST incomplete?",
+                        nom::Err::Error(e) | nom::Err::Failure(e) => e.input,
+                    }
+                );
                 None
             }
         })

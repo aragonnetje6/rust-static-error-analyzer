@@ -112,7 +112,7 @@ fn token_kind(input: &str) -> IResult<&str, ()> {
             ),
             tuple_struct_parser(
                 "NtLifetime",
-                tuple((field(spaced_string), field(ident_is_raw))),
+                tuple((field(ident), field(ident_is_raw))),
                 discard,
             ),
             tuple_struct_parser("Interpolated", field(nonterminal), discard),

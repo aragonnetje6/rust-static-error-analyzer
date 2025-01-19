@@ -1,5 +1,5 @@
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
 };
@@ -18,25 +18,24 @@ pub struct CompilerCommands {
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
 pub fn get_compiler_args(
     relative_manifest_path: &Path,
-    manifest_path: &Path,
     manifest_info: &ManifestInfo,
 ) -> CompilerCommands {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
 
-    cargo_clean(manifest_path, &manifest_info.package_name);
+    cargo_clean(&manifest_info.root_path, &manifest_info.package_name);
 
-    let build_output = cargo_build_verbose(manifest_path);
+    let build_output = cargo_build_verbose(relative_manifest_path, manifest_info);
 
     let invocations = get_rustc_invocations(&build_output, manifest_info);
 
     let bin_commands = invocations
         .bin_invocations
         .iter()
-        .map(|invocation| split_args(relative_manifest_path, invocation, manifest_info))
+        .map(|invocation| split_args(invocation, manifest_info))
         .collect();
     let lib_command = invocations
         .lib_invocation
-        .map(|invocation| split_args(relative_manifest_path, &invocation, manifest_info));
+        .map(|invocation| split_args(&invocation, manifest_info));
 
     CompilerCommands {
         bin_commands,
@@ -52,11 +51,7 @@ enum StringArg {
 }
 
 /// Split up individual arguments from the command.
-fn split_args(
-    relative_manifest_path: &Path,
-    command: &str,
-    manifest_info: &ManifestInfo,
-) -> Vec<String> {
+fn split_args(command: &str, manifest_info: &ManifestInfo) -> Vec<String> {
     let mut res = vec![];
     let mut temp = StringArg::None;
 
@@ -67,14 +62,7 @@ fn split_args(
         // If this is the path to main.rs, prepend the relative path to the manifest, stripping away Cargo.toml
         for target in manifest_info.bins.iter().chain(&manifest_info.lib) {
             if arg.contains(&target.path) {
-                arg = format!(
-                    "{}/{arg}",
-                    relative_manifest_path
-                        .parent()
-                        .expect("manifest folder invalid")
-                        .to_str()
-                        .expect("invalid characters in path")
-                );
+                arg = format!("{}/{arg}", manifest_info.root_path.to_string_lossy());
             }
         }
         temp = match temp {
@@ -154,17 +142,13 @@ fn split_args(
 }
 
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
-fn cargo_clean(manifest_path: &Path, package_name: &str) -> String {
+fn cargo_clean(root_path: &Path, package_name: &str) -> String {
     println!("Cleaning package...");
     let output = Command::new("cargo")
         .arg("clean")
         .arg("-p")
         .arg(package_name)
-        .current_dir(
-            manifest_path
-                .parent()
-                .expect("Could not get manifest directory!"),
-        )
+        .current_dir(root_path)
         .output()
         .expect("Could not clean!");
 
@@ -219,6 +203,7 @@ pub struct ManifestInfo {
     pub package_name: String,
     pub lib: Option<Crate>,
     pub bins: Vec<Crate>,
+    pub root_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -285,10 +270,36 @@ pub fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
         name: lib_name,
         path: lib_path,
     });
+    let mut workspace_path = std::path::absolute(manifest_path).expect("directory does not exist");
+    workspace_path.pop();
+    workspace_path.pop();
+    workspace_path.push("Cargo.toml");
+    let root_path = if std::fs::read_to_string(&workspace_path)
+        .ok()
+        .and_then(|text| text.parse::<Table>().ok())
+        .as_ref()
+        .and_then(|table| table.get("workspace"))
+        .and_then(|value| value.as_table())
+        .and_then(|workspace| workspace.get("members"))
+        .and_then(|value| value.as_array())
+        .is_some_and(|members| {
+            members
+                .iter()
+                .filter_map(|member| member.as_str())
+                .any(|member| member == package_name)
+        }) {
+        workspace_path.pop();
+        workspace_path
+    } else {
+        let mut root_path = manifest_path.to_path_buf();
+        root_path.pop();
+        root_path
+    };
     ManifestInfo {
         package_name,
         lib,
         bins,
+        root_path,
     }
 }
 
@@ -303,13 +314,14 @@ fn cargo_version() -> String {
 }
 
 /// Run `cargo build -v` on the given manifest.
-fn cargo_build_verbose(manifest_path: &Path) -> String {
+fn cargo_build_verbose(relative_manifest_path: &Path, manifest_info: &ManifestInfo) -> String {
     println!("Building package...");
     let output = Command::new("cargo")
         .arg("build")
         .arg("-v")
         .arg("--manifest-path")
-        .arg(manifest_path.as_os_str())
+        .arg(std::path::absolute(relative_manifest_path).expect("manifest path broken"))
+        .current_dir(&manifest_info.root_path)
         .output()
         .expect("Could not build!");
 
