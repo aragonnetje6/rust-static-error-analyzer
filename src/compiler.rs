@@ -103,7 +103,6 @@ impl Executor for GetArgumentExecutor {
     }
 }
 
-/// Run `cargo build -v` on the given manifest.
 fn get_build_arguments(gctx: &GlobalContext, workspace: &Workspace) -> Vec<ProcessBuilder> {
     println!("Building package...");
     let executor = Arc::new(GetArgumentExecutor::default());
@@ -122,8 +121,6 @@ fn get_build_arguments(gctx: &GlobalContext, workspace: &Workspace) -> Vec<Proce
         .unwrap()
 }
 
-/// Run a compiler with the provided arguments and callbacks.
-/// Returns the exit code of the compiler.
 pub fn run_compiler(
     process_builder: &ProcessBuilder,
     callbacks: &mut (dyn rustc_driver::Callbacks + Send),
