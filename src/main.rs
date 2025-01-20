@@ -76,7 +76,7 @@ fn main() {
         .collect::<Vec<_>>());
 
     // Extract the compiler arguments from running `cargo build`
-    let compiler_commands = get_compiler_args(&workspace, &gctx);
+    let process_builders = get_compiler_args(&workspace, &gctx);
 
     // Enable CTRL + C
     rustc_driver::install_ctrlc_handler();
@@ -93,9 +93,9 @@ fn main() {
     // Run the compiler using the retrieved args.
     let cwd = std::env::current_dir().expect("cwd invalid");
     std::env::set_current_dir(workspace.root()).expect("root path invalid");
-    for compiler_command in compiler_commands {
+    for process_builder in process_builders {
         run_compiler(
-            compiler_command,
+            &process_builder,
             &mut callbacks,
             using_internal_features.clone(),
         );

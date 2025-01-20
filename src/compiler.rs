@@ -17,8 +17,8 @@ use crate::{analysis, graph::CallGraph};
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
 pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> Vec<ProcessBuilder> {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
-    cargo_clean(&workspace, &gctx).expect("cleaning failed");
-    cargo_build_verbose(&gctx, &workspace)
+    cargo_clean(workspace, gctx).expect("cleaning failed");
+    cargo_build_verbose(gctx, workspace)
 }
 
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
@@ -107,10 +107,10 @@ impl Executor for GetArgumentExecutor {
 fn cargo_build_verbose(gctx: &GlobalContext, workspace: &Workspace) -> Vec<ProcessBuilder> {
     println!("Building package...");
     let executor = Arc::new(GetArgumentExecutor::default());
-    let options = cargo::ops::CompileOptions::new(&gctx, cargo::core::compiler::CompileMode::Build)
+    let options = cargo::ops::CompileOptions::new(gctx, cargo::core::compiler::CompileMode::Build)
         .expect("could not create options????");
     cargo::ops::compile_with_exec(
-        &workspace,
+        workspace,
         &options,
         &(executor.clone() as Arc<dyn Executor>),
     )
@@ -125,7 +125,7 @@ fn cargo_build_verbose(gctx: &GlobalContext, workspace: &Workspace) -> Vec<Proce
 /// Run a compiler with the provided arguments and callbacks.
 /// Returns the exit code of the compiler.
 pub fn run_compiler(
-    process_builder: ProcessBuilder,
+    process_builder: &ProcessBuilder,
     callbacks: &mut (dyn rustc_driver::Callbacks + Send),
     using_internal_features: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> i32 {
