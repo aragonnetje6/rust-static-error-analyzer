@@ -18,12 +18,12 @@ extern crate rustc_session;
 
 use analysis::calls_to_chains;
 use cargo::{
-    core::{Shell, TargetKind, Workspace},
+    core::{Shell, Workspace},
     util::homedir,
     GlobalContext,
 };
 use clap::Parser;
-use compiler::{cargo_ast, get_compiler_args, get_manifest_info, run_compiler, AnalysisCallbacks};
+use compiler::{cargo_ast, get_compiler_args, run_compiler, AnalysisCallbacks};
 use graph::CallGraph;
 use std::{
     path::PathBuf,
@@ -74,8 +74,6 @@ fn main() {
         .iter()
         .filter(|target| !target.is_test())
         .collect::<Vec<_>>());
-
-    let manifest_info = get_manifest_info(&manifest_path);
 
     // Extract the compiler arguments from running `cargo build`
     let compiler_commands = get_compiler_args(&workspace, &gctx);
