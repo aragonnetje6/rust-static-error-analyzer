@@ -1,165 +1,44 @@
 use std::{
+    error::Error,
+    fmt::Display,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
 };
 
+use cargo::{
+    core::{compiler::Executor, Target, Workspace},
+    util::interning::InternedString,
+    CargoResult, GlobalContext,
+};
+use cargo_util::ProcessBuilder;
 use rustc_driver::Compilation;
 use toml::Table;
 
 use crate::{analysis, graph::CallGraph};
 
-#[derive(Debug)]
-pub struct CompilerCommands {
-    pub bin_commands: Vec<Vec<String>>,
-    pub lib_command: Option<Vec<String>>,
-}
-
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
-pub fn get_compiler_args(
-    relative_manifest_path: &Path,
-    manifest_info: &ManifestInfo,
-) -> CompilerCommands {
+pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> Vec<ProcessBuilder> {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
-
-    cargo_clean(&manifest_info.root_path, &manifest_info.package_name);
-
-    let build_output = cargo_build_verbose(relative_manifest_path, manifest_info);
-
-    let invocations = get_rustc_invocations(&build_output, manifest_info);
-
-    let bin_commands = invocations
-        .bin_invocations
-        .iter()
-        .map(|invocation| split_args(invocation, manifest_info))
-        .collect();
-    let lib_command = invocations
-        .lib_invocation
-        .map(|invocation| split_args(&invocation, manifest_info));
-
-    CompilerCommands {
-        bin_commands,
-        lib_command,
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum StringArg {
-    None,
-    SingleQuoted(String),
-    DoubleQouted(String),
-}
-
-/// Split up individual arguments from the command.
-fn split_args(command: &str, manifest_info: &ManifestInfo) -> Vec<String> {
-    let mut res = vec![];
-    let mut temp = StringArg::None;
-
-    // Split on ' '
-    for arg in command.split(' ') {
-        let mut arg = arg.to_owned();
-
-        // If this is the path to main.rs, prepend the relative path to the manifest, stripping away Cargo.toml
-        for target in manifest_info.bins.iter().chain(&manifest_info.lib) {
-            if arg.contains(&target.path) {
-                arg = format!("{}/{arg}", &manifest_info.root_path.to_string_lossy());
-            }
-        }
-        temp = match temp {
-            StringArg::None => {
-                if arg.starts_with('"') && arg.ends_with('"') {
-                    res.push(
-                        arg.strip_prefix('"')
-                            .and_then(|x| x.strip_suffix('"'))
-                            .expect("unquoting failure")
-                            .to_owned(),
-                    );
-                    StringArg::None
-                } else if arg.starts_with('\'') && arg.ends_with('\'') {
-                    res.push(
-                        arg.strip_prefix('\'')
-                            .and_then(|x| x.strip_suffix('\''))
-                            .expect("unquoting failure")
-                            .to_owned(),
-                    );
-                    StringArg::None
-                } else if arg.starts_with('"') {
-                    StringArg::DoubleQouted(
-                        arg.strip_prefix('"').expect("unquoting failure").to_owned(),
-                    )
-                } else if arg.starts_with('\'') {
-                    StringArg::SingleQuoted(
-                        arg.strip_prefix('\'')
-                            .expect("unquoting failure")
-                            .to_owned(),
-                    )
-                } else {
-                    res.push(arg);
-                    StringArg::None
-                }
-            }
-            StringArg::SingleQuoted(mut temp) => {
-                temp.push(' ');
-                if arg.ends_with('\'') {
-                    temp.push_str(arg.strip_suffix('\'').expect("unquoting failure"));
-                    res.push(temp);
-                    StringArg::None
-                } else {
-                    temp.push_str(&arg);
-                    temp.push(' ');
-                    StringArg::SingleQuoted(temp)
-                }
-            }
-            StringArg::DoubleQouted(mut temp) => {
-                temp.push(' ');
-                if arg.ends_with('"') {
-                    temp.push_str(arg.strip_suffix('"').expect("unquoting failure"));
-                    res.push(temp);
-                    StringArg::None
-                } else {
-                    temp.push_str(&arg);
-                    StringArg::DoubleQouted(temp)
-                }
-            }
-        };
-    }
-
-    // Overwrite error format args
-    for i in 0..res.len() {
-        if i >= res.len() {
-            break;
-        }
-        res[i] = res[i].replace("\\\"", "\"");
-        if res[i].starts_with("--error-format=") {
-            res[i] = String::from("--error-format=short");
-        }
-        if res[i].starts_with("--json=") {
-            res.remove(i);
-        }
-    }
-
-    res
+    cargo_clean(&workspace, &gctx).expect("cleaning failed");
+    cargo_build_verbose(&gctx, &workspace)
 }
 
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
-fn cargo_clean(root_path: &Path, package_name: &str) -> String {
+fn cargo_clean(workspace: &Workspace, gctx: &GlobalContext) -> CargoResult<()> {
     println!("Cleaning package...");
-    let output = Command::new("cargo")
-        .arg("clean")
-        .arg("-p")
-        .arg(package_name)
-        .current_dir(root_path)
-        .output()
-        .expect("Could not clean!");
-
-    let stderr = String::from_utf8(output.stderr).expect("Invalid UTF8!");
-
-    if output.status.code() != Some(0) {
-        eprintln!("Could not clean package!");
-        println!("{stderr:?}");
-    }
-
-    stderr
+    cargo::ops::clean(
+        workspace,
+        &cargo::ops::CleanOptions {
+            gctx,
+            spec: Vec::new(),
+            targets: Vec::new(),
+            profile_specified: false,
+            requested_profile: InternedString::new("dev"),
+            doc: false,
+            dry_run: false,
+        },
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -168,13 +47,14 @@ pub(crate) enum LibOrBin<'a> {
     Bin(&'a str),
 }
 
-pub fn cargo_ast(manifest_path: &Path, lib_or_bin: LibOrBin) -> String {
+pub fn cargo_ast(manifest_path: &Path, target: &Target) -> String {
     println!("Getting AST...");
     let mut command = Command::new("cargo");
     command.arg("+nightly").arg("rustc");
-    let output = match lib_or_bin {
-        LibOrBin::Lib => command.arg("--lib"),
-        LibOrBin::Bin(name) => command.arg("--bin").arg(name),
+    let output = if target.is_lib() {
+        command.arg("--lib")
+    } else {
+        command.arg("--bin").arg(target.name())
     }
     .arg("--")
     .arg("-Zunpretty=ast-tree,expanded")
@@ -225,7 +105,7 @@ pub fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
         .as_str()
         .expect("No name found in package information!")
         .to_owned();
-    let root_path = manifest_path
+    let crate_root_path = manifest_path
         .parent()
         .expect("crate directory does not exist");
     let bins = table
@@ -245,7 +125,7 @@ pub fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
                         .and_then(|bin| bin.get("path"))
                         .and_then(|name| name.as_str())
                         .map_or_else(|| String::from("src/main.rs"), str::to_owned);
-                    root_path.join(&bin_path).exists().then_some(Crate {
+                    crate_root_path.join(&bin_path).exists().then_some(Crate {
                         name: bin_name,
                         path: bin_path,
                     })
@@ -265,11 +145,12 @@ pub fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
         .and_then(|lib| lib.get("path"))
         .and_then(|name| name.as_str())
         .map_or_else(|| String::from("src/lib.rs"), str::to_owned);
-    let lib = root_path.join(&lib_path).exists().then_some(Crate {
+    let lib = crate_root_path.join(&lib_path).exists().then_some(Crate {
         name: lib_name,
         path: lib_path,
     });
-    let mut workspace_path = std::path::absolute(root_path).expect("directory does not exist");
+    let mut workspace_path =
+        std::path::absolute(crate_root_path).expect("directory does not exist");
     workspace_path.pop();
     workspace_path.push("Cargo.toml");
     let root_path = if std::fs::read_to_string(&workspace_path)
@@ -284,7 +165,7 @@ pub fn get_manifest_info(manifest_path: &Path) -> ManifestInfo {
             members
                 .iter()
                 .filter_map(|member| member.as_str())
-                .any(|member| member == root_path.file_name().expect("no name?"))
+                .any(|member| member == crate_root_path.file_name().expect("no name?"))
         }) {
         workspace_path.pop();
         workspace_path
@@ -311,33 +192,58 @@ fn cargo_version() -> String {
     String::from_utf8(output.stdout).expect("Invalid UTF8!")
 }
 
-/// Run `cargo build -v` on the given manifest.
-fn cargo_build_verbose(relative_manifest_path: &Path, manifest_info: &ManifestInfo) -> String {
-    println!("Building package...");
-    let output = Command::new("cargo")
-        .arg("build")
-        .arg("-v")
-        .arg("--manifest-path")
-        .arg(std::path::absolute(relative_manifest_path).expect("manifest path broken"))
-        .current_dir(&manifest_info.root_path)
-        .output()
-        .expect("Could not build!");
+#[derive(Debug, Clone, Copy)]
+struct StopError;
 
-    let stderr = String::from_utf8(output.stderr).expect("Invalid UTF8!");
-
-    if output.status.code() != Some(0) {
-        eprintln!("Could not (fully) build package!");
-        eprintln!();
-        for line in stderr.split('\n') {
-            if line.starts_with("error") {
-                eprintln!("{line}");
-            }
-        }
-        eprintln!();
-        eprintln!("Trying to continue...");
+impl Display for StopError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "compilation stopped")
     }
+}
 
-    stderr
+impl Error for StopError {}
+
+#[derive(Debug, Default)]
+struct GetArgumentExecutor {
+    result: Mutex<Vec<ProcessBuilder>>,
+}
+
+impl Executor for GetArgumentExecutor {
+    fn exec(
+        &self,
+        cmd: &ProcessBuilder,
+        _id: cargo::core::PackageId,
+        _target: &cargo::core::Target,
+        _mode: cargo::core::compiler::CompileMode,
+        _on_stdout_line: &mut dyn FnMut(&str) -> CargoResult<()>,
+        _on_stderr_line: &mut dyn FnMut(&str) -> CargoResult<()>,
+    ) -> CargoResult<()> {
+        if cmd
+            .get_env("CARGO_PRIMARY_PACKAGE")
+            .is_some_and(|x| x == "1")
+        {
+            self.result.lock().unwrap().push(cmd.clone());
+        }
+        Ok(())
+    }
+}
+
+/// Run `cargo build -v` on the given manifest.
+fn cargo_build_verbose(gctx: &GlobalContext, workspace: &Workspace) -> Vec<ProcessBuilder> {
+    println!("Building package...");
+    let executor = Arc::new(GetArgumentExecutor::default());
+    let options = cargo::ops::CompileOptions::new(&gctx, cargo::core::compiler::CompileMode::Build)
+        .expect("could not create options????");
+    cargo::ops::compile_with_exec(
+        &workspace,
+        &options,
+        &(executor.clone() as Arc<dyn Executor>),
+    );
+    Arc::into_inner(executor)
+        .unwrap()
+        .result
+        .into_inner()
+        .unwrap()
 }
 
 #[derive(Debug)]
@@ -399,13 +305,25 @@ fn get_rustc_invocations(build_output: &str, manifest_info: &ManifestInfo) -> Co
 /// Run a compiler with the provided arguments and callbacks.
 /// Returns the exit code of the compiler.
 pub fn run_compiler(
-    args: Vec<String>,
+    process_builder: ProcessBuilder,
     callbacks: &mut (dyn rustc_driver::Callbacks + Send),
     using_internal_features: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> i32 {
     println!("Running compiler...");
 
-    // Invoke compiler, and return the exit code
+    let mut args = process_builder
+        .get_args()
+        .map(|x| x.to_str().unwrap().to_owned())
+        .filter(|x| !x.contains("--json"))
+        .map(|x| {
+            if x.contains("--error-format") {
+                String::from("--error-format=short")
+            } else {
+                x
+            }
+        })
+        .collect::<Vec<String>>();
+    args.insert(0, String::new());
     rustc_driver::catch_with_exit_code(move || {
         rustc_driver::RunCompiler::new(&args, callbacks)
             .set_using_internal_features(using_internal_features)

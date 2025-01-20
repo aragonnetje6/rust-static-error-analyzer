@@ -10,6 +10,9 @@ authors = ["Thomas Kas", "Grace Stok"]
 rustc_private=true
 
 [dependencies]
+anyhow = "1.0.95"
+cargo = "0.85.0"
+cargo-util = "0.2.17"
 clap = { version = "4.5.26", features = ["derive"] }
 dot = "0.1.4"
 nom = "7.1.3"

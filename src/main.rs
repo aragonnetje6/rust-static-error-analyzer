@@ -17,11 +17,16 @@ extern crate rustc_parse;
 extern crate rustc_session;
 
 use analysis::calls_to_chains;
+use cargo::{
+    core::{Shell, TargetKind, Workspace},
+    util::homedir,
+    GlobalContext,
+};
 use clap::Parser;
 use compiler::{cargo_ast, get_compiler_args, get_manifest_info, run_compiler, AnalysisCallbacks};
 use graph::CallGraph;
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -46,12 +51,34 @@ fn main() {
         rustc_session::EarlyDiagCtxt::new(rustc_session::config::ErrorOutputType::default());
 
     let args = Args::parse();
-    let manifest_path = absolute_path(&args.manifest);
+    let manifest_path = std::path::absolute(&args.manifest)
+        .expect("current directory invalid")
+        .canonicalize()
+        .unwrap();
+
+    let mut shell = Shell::new();
+    shell.set_verbosity(cargo::core::Verbosity::Quiet);
+    let gctx = GlobalContext::new(
+        shell,
+        manifest_path
+            .parent()
+            .expect("manifest in invalid folder")
+            .to_path_buf(),
+        homedir(&manifest_path).expect("couldn't get homedir"),
+    );
+    let workspace = Workspace::new(&manifest_path, &gctx).expect("workspace not created");
+    dbg!(&workspace
+        .current()
+        .unwrap()
+        .targets()
+        .iter()
+        .filter(|target| !target.is_test())
+        .collect::<Vec<_>>());
 
     let manifest_info = get_manifest_info(&manifest_path);
 
     // Extract the compiler arguments from running `cargo build`
-    let compiler_commands = get_compiler_args(&manifest_path, &manifest_info);
+    let compiler_commands = get_compiler_args(&workspace, &gctx);
 
     // Enable CTRL + C
     rustc_driver::install_ctrlc_handler();
@@ -62,38 +89,29 @@ fn main() {
 
     // This allows tools to enable rust logging without having to magically match rustc’s tracing crate version.
     rustc_driver::init_rustc_env_logger(&early_dcx);
-    let mut callbacks = AnalysisCallbacks::new(Arc::new(Mutex::new(CallGraph::new(
-        manifest_info.package_name,
-    ))));
+    let mut callbacks = AnalysisCallbacks::new(Arc::new(Mutex::new(CallGraph::new(String::from(
+        &*workspace.current().unwrap().name(),
+    )))));
     // Run the compiler using the retrieved args.
     let cwd = std::env::current_dir().expect("cwd invalid");
-    std::env::set_current_dir(manifest_info.root_path).expect("root path invalid");
-    if let Some(compiler_command) = compiler_commands.lib_command {
+    std::env::set_current_dir(workspace.root()).expect("root path invalid");
+    for compiler_command in compiler_commands {
         run_compiler(
             compiler_command,
             &mut callbacks,
             using_internal_features.clone(),
         );
     }
-    for compiler_command in compiler_commands.bin_commands {
-        run_compiler(
-            compiler_command.clone(),
-            &mut callbacks,
-            using_internal_features.clone(),
-        );
-    }
     std::env::set_current_dir(cwd).expect("failed to reset cwd");
 
-    let mut asts = vec![];
-    if manifest_info.lib.is_some() {
-        asts.push(cargo_ast(&manifest_path, compiler::LibOrBin::Lib));
-    }
-    for name in manifest_info.bins {
-        asts.push(cargo_ast(
-            &manifest_path,
-            compiler::LibOrBin::Bin(&name.name),
-        ));
-    }
+    let asts: Vec<String> = workspace
+        .current()
+        .unwrap()
+        .targets()
+        .iter()
+        .filter(|target| !target.is_test())
+        .map(|target| cargo_ast(&manifest_path, target))
+        .collect();
 
     println!("Parsing ASTs...");
 
@@ -144,11 +162,4 @@ fn main() {
             println!("{dot}");
         }
     }
-}
-
-/// Turn relative path into absolute path
-fn absolute_path(cargo_path: &Path) -> PathBuf {
-    std::env::current_dir()
-        .expect("current directory is invalid")
-        .join(cargo_path)
 }
