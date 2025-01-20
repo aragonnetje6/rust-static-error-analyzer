@@ -67,13 +67,6 @@ fn main() {
         homedir(&manifest_path).expect("couldn't get homedir"),
     );
     let workspace = Workspace::new(&manifest_path, &gctx).expect("workspace not created");
-    dbg!(&workspace
-        .current()
-        .unwrap()
-        .targets()
-        .iter()
-        .filter(|target| !target.is_test())
-        .collect::<Vec<_>>());
 
     // Extract the compiler arguments from running `cargo build`
     let process_builders = get_compiler_args(&workspace, &gctx);
