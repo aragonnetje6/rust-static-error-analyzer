@@ -18,7 +18,7 @@ use crate::{analysis, graph::CallGraph};
 pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> Vec<ProcessBuilder> {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
     cargo_clean(workspace, gctx).expect("cleaning failed");
-    cargo_build_verbose(gctx, workspace)
+    get_build_arguments(gctx, workspace)
 }
 
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
@@ -104,7 +104,7 @@ impl Executor for GetArgumentExecutor {
 }
 
 /// Run `cargo build -v` on the given manifest.
-fn cargo_build_verbose(gctx: &GlobalContext, workspace: &Workspace) -> Vec<ProcessBuilder> {
+fn get_build_arguments(gctx: &GlobalContext, workspace: &Workspace) -> Vec<ProcessBuilder> {
     println!("Building package...");
     let executor = Arc::new(GetArgumentExecutor::default());
     let options = cargo::ops::CompileOptions::new(gctx, cargo::core::compiler::CompileMode::Build)
