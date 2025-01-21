@@ -20,23 +20,19 @@ pub struct CallNode {
     pub span: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PanicInfo {
     pub explicit_invocation: bool,
     pub doc_section: bool,
-}
-
-impl Default for PanicInfo {
-    fn default() -> Self {
-        Self::new(false, false)
-    }
+    pub catches: Vec<String>,
 }
 
 impl PanicInfo {
-    pub fn new(explicit_invocation: bool, doc_section: bool) -> Self {
+    pub fn new(explicit_invocation: bool, doc_section: bool, catches: Vec<String>) -> Self {
         Self {
             explicit_invocation,
             doc_section,
+            catches,
         }
     }
 }

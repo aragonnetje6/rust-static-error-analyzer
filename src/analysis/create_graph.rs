@@ -71,7 +71,7 @@ fn update_call_graph_with_trait_item(
             );
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
-            add_calls_from_function(context, node_id, body_id.hir_id, graph);
+            add_calls_from_body(context, node_id, body_id, graph);
         }
         TraitItemKind::Fn(..) | TraitItemKind::Const(..) | TraitItemKind::Type(..) => {}
     }
@@ -104,7 +104,7 @@ fn update_call_graph_with_impl_item(
             );
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
-            add_calls_from_function(context, node_id, body_id.hir_id, graph);
+            add_calls_from_body(context, node_id, body_id, graph);
         }
         ImplItemKind::Const(..) | ImplItemKind::Type(..) => {}
     }
@@ -124,7 +124,7 @@ fn update_call_graph_with_item(context: TyCtxt<'_>, graph: &mut CallGraph, item:
             );
 
             // Add edges/nodes for all functions called from within this function (and recursively do it for those functions as well)
-            add_calls_from_function(context, node_id, body.hir_id, graph);
+            add_calls_from_body(context, node_id, body, graph);
         }
         ItemKind::ExternCrate(..)
         | ItemKind::Use(..)
@@ -145,73 +145,24 @@ fn update_call_graph_with_item(context: TyCtxt<'_>, graph: &mut CallGraph, item:
 }
 
 /// Retrieve all function calls within a function, and add the nodes and edges to the graph.
-fn add_calls_from_function(context: TyCtxt, from_node: usize, fn_id: HirId, graph: &mut CallGraph) {
-    let node = context.hir_node(fn_id);
-
-    // Access the code block of the function
-    match node {
-        rustc_hir::Node::Expr(expr) => {
-            if let ExprKind::Block(block, _) = expr.kind {
-                add_calls_from_block(context, from_node, block, graph);
-            } else if let ExprKind::Closure(closure) = expr.kind {
-                add_calls_from_function(context, from_node, closure.body.hir_id, graph);
-            }
-        }
-        rustc_hir::Node::Block(block) => {
-            add_calls_from_block(context, from_node, block, graph);
-        }
-        rustc_hir::Node::Item(item) => {
-            if let ItemKind::Fn { body, .. } = item.kind {
-                add_calls_from_function(context, from_node, body.hir_id, graph);
-            }
-        }
-        rustc_hir::Node::ImplItem(item) => {
-            if let ImplItemKind::Fn(_sig, id) = item.kind {
-                add_calls_from_function(context, from_node, id.hir_id, graph);
-            }
-        }
-        rustc_hir::Node::TraitItem(item) => {
-            if let TraitItemKind::Fn(_sig, rustc_hir::TraitFn::Provided(id)) = item.kind {
-                add_calls_from_function(context, from_node, id.hir_id, graph);
-            }
-        }
-        Node::Param(..)
-        | Node::ForeignItem(..)
-        | Node::Variant(..)
-        | Node::Field(..)
-        | Node::AnonConst(..)
-        | Node::ConstBlock(..)
-        | Node::ConstArg(..)
-        | Node::ExprField(..)
-        | Node::Stmt(..)
-        | Node::PathSegment(..)
-        | Node::Ty(..)
-        | Node::AssocItemConstraint(..)
-        | Node::TraitRef(..)
-        | Node::OpaqueTy(..)
-        | Node::Pat(..)
-        | Node::PatField(..)
-        | Node::PatExpr(..)
-        | Node::Arm(..)
-        | Node::LetStmt(..)
-        | Node::Ctor(..)
-        | Node::Lifetime(..)
-        | Node::GenericParam(..)
-        | Node::Crate(..)
-        | Node::Infer(..)
-        | Node::WherePredicate(..)
-        | Node::PreciseCapturingNonLifetimeArg(..)
-        | Node::Synthetic
-        | Node::Err(..) => {}
-    }
+fn add_calls_from_body(context: TyCtxt, from_node: usize, body_id: BodyId, graph: &mut CallGraph) {
+    add_calls_from_expr(context, from_node, context.hir().body(body_id).value, graph);
 }
 
-/// Retrieve all function calls within a block, and add the nodes and edges to the graph.
-fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut CallGraph) {
+fn add_calls_from_expr(context: TyCtxt, from_node: usize, expr: &Expr, graph: &mut CallGraph) {
     // Get the function calls from within this block
-    let calls = get_function_calls_in_block(context, block, true);
+    let calls = get_function_calls_in_expression(context, expr);
 
     // Add edges for all function calls
+    add_calls_to_graph(context, from_node, graph, calls);
+}
+
+fn add_calls_to_graph(
+    context: TyCtxt<'_>,
+    from: usize,
+    graph: &mut CallGraph,
+    calls: Vec<FunctionCallInfo>,
+) {
     for FunctionCallInfo {
         node_kind,
         hir_id,
@@ -244,7 +195,9 @@ fn add_calls_from_block(context: TyCtxt, from: usize, block: &Block, graph: &mut
                         graph.add_edge(CallEdge::new_untyped(from, id, hir_id, propagates));
                     }
 
-                    add_calls_from_function(context, id, hir_id, graph);
+                    if let Some(body) = context.hir().maybe_body_owned_by(def_id.expect_local()) {
+                        add_calls_from_body(context, id, body.id(), graph);
+                    }
                 }
             }
             CallNodeKind::NonLocalFn(def_id) => {
@@ -436,7 +389,7 @@ fn get_function_calls_in_expression(context: TyCtxt, expr: &Expr) -> Vec<Functio
             res.push(FunctionCallInfo {
                 node_kind,
                 hir_id: expr.hir_id,
-                add_edge: false,
+                add_edge: true,
                 propagates: false,
             });
         }
@@ -626,7 +579,10 @@ fn get_function_calls_in_pattern_expression(
 }
 
 /// Get the node kind from a given `QPath`.
-fn get_node_kind_from_path(context: TyCtxt, qpath: QPath) -> Option<(CallNodeKind, bool)> {
+pub(crate) fn get_node_kind_from_path(
+    context: TyCtxt,
+    qpath: QPath,
+) -> Option<(CallNodeKind, bool)> {
     match qpath {
         QPath::Resolved(_, path) => {
             if let Res::Def(kind, id) = path.res {
