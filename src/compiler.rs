@@ -141,6 +141,8 @@ pub fn run_compiler(
         })
         .collect::<Vec<String>>();
     args.insert(0, String::new());
+    args.push(String::from("--cap-lints"));
+    args.push(String::from("allow"));
     rustc_driver::catch_with_exit_code(move || {
         rustc_driver::RunCompiler::new(&args, callbacks)
             .set_using_internal_features(using_internal_features)
