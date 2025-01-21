@@ -1,71 +1,32 @@
-use rustc_hir::{def_id::DefId, HirId, Node};
-use rustc_middle::{
-    mir::TerminatorKind,
-    ty::{GenericArg, Ty, TyCtxt, TyKind},
-};
-
-/// Get the return type of a called function.
-#[allow(clippy::similar_names)]
-fn get_call_type(context: TyCtxt, call_id: HirId, caller_id: DefId, called_id: DefId) -> Ty {
-    get_call_type_using_mir(context, call_id, caller_id)
-        .unwrap_or_else(|| get_call_type_using_context(context, called_id))
-}
+use rustc_hir::def_id::DefId;
+use rustc_middle::ty::{GenericArg, Ty, TyCtxt, TyKind};
 
 /// Extracts the return type of a called function using just the function's `DefId`.
 /// Should always succeed.
 fn get_call_type_using_context(context: TyCtxt, called_id: DefId) -> Ty {
-    if context.type_of(called_id).instantiate_identity().is_fn() {
+    let ty = context.type_of(called_id).instantiate_identity();
+    if ty.is_fn() {
         context
             .fn_sig(called_id)
             .instantiate_identity()
-            .output()
             .skip_binder()
+            .output()
+    } else if let TyKind::Closure(_, args) = ty.kind() {
+        args.as_closure().sig().skip_binder().output()
+    } else if let TyKind::CoroutineClosure(_, args) = ty.kind() {
+        args.as_coroutine_closure()
+            .coroutine_closure_sig()
+            .skip_binder()
+            .return_ty
     } else {
-        context.type_of(called_id).instantiate_identity()
+        ty
     }
-}
-
-/// Extracts the return type of a called function using its call's `HirId`, as well as the caller's `DefId`.
-/// Returns `None` if no MIR is available or the call was not found (e.g. due to desugaring/optimizations).
-fn get_call_type_using_mir(context: TyCtxt, hir_id: HirId, caller_id: DefId) -> Option<Ty> {
-    if !context.is_mir_available(caller_id) {
-        return None;
-    }
-
-    if let Node::Expr(call_expr) = context.hir_node(hir_id) {
-        let mir = context.optimized_mir(caller_id);
-        for block in mir.basic_blocks.iter() {
-            if let Some(terminator) = &block.terminator {
-                if let TerminatorKind::Call { func, fn_span, .. } = &terminator.kind {
-                    if call_expr.span.hi() == fn_span.hi() {
-                        if let Some((def_id, args)) = func.const_fn_def() {
-                            return Some(
-                                context
-                                    .type_of(def_id)
-                                    .instantiate(context, args)
-                                    .fn_sig(context)
-                                    .output()
-                                    .skip_binder(),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
 }
 
 /// Extract the error type from Result, or return the full type if it doesn't contain a Result (along with a flag of whether it is an extract error).
 #[allow(clippy::similar_names)]
-pub fn get_error_or_type(
-    context: TyCtxt,
-    call_id: HirId,
-    caller_id: DefId,
-    called_id: DefId,
-) -> (String, bool) {
-    let ret_ty = get_call_type(context, call_id, caller_id, called_id);
+pub fn get_error_or_type(context: TyCtxt, called_id: DefId) -> (String, bool) {
+    let ret_ty = get_call_type_using_context(context, called_id);
 
     let result = if context.ty_is_opaque_future(ret_ty) {
         extract_result_from_future(context, ret_ty)
