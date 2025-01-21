@@ -54,7 +54,7 @@ fn main() {
     let manifest_path = std::path::absolute(&args.manifest)
         .expect("current directory invalid")
         .canonicalize()
-        .unwrap();
+        .expect("manifest path failed to resolve");
 
     let mut shell = Shell::new();
     shell.set_verbosity(cargo::core::Verbosity::Quiet);
@@ -81,7 +81,7 @@ fn main() {
     // This allows tools to enable rust logging without having to magically match rustc’s tracing crate version.
     rustc_driver::init_rustc_env_logger(&early_dcx);
     let mut callbacks = AnalysisCallbacks::new(Arc::new(Mutex::new(CallGraph::new(String::from(
-        &*workspace.current().unwrap().name(),
+        &*workspace.current().expect("impossible").name(),
     )))));
     // Run the compiler using the retrieved args.
     let cwd = std::env::current_dir().expect("cwd invalid");
@@ -97,7 +97,7 @@ fn main() {
 
     let asts: Vec<String> = workspace
         .current()
-        .unwrap()
+        .expect("impossible")
         .targets()
         .iter()
         .filter(|target| !target.is_test())

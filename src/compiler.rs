@@ -97,7 +97,10 @@ impl Executor for GetArgumentExecutor {
             .get_env("CARGO_PRIMARY_PACKAGE")
             .is_some_and(|x| x == "1")
         {
-            self.result.lock().unwrap().push(cmd.clone());
+            self.result
+                .lock()
+                .expect("mutex poisoned, something crashed")
+                .push(cmd.clone());
         }
         Ok(())
     }
@@ -113,12 +116,12 @@ fn get_build_arguments(gctx: &GlobalContext, workspace: &Workspace) -> Vec<Proce
         &options,
         &(executor.clone() as Arc<dyn Executor>),
     )
-    .unwrap();
+    .expect("Cargo failed to build package");
     Arc::into_inner(executor)
-        .unwrap()
+        .expect("should never fail")
         .result
         .into_inner()
-        .unwrap()
+        .expect("should never fail")
 }
 
 pub fn run_compiler(
@@ -130,7 +133,11 @@ pub fn run_compiler(
 
     let mut args = process_builder
         .get_args()
-        .map(|x| x.to_str().unwrap().to_owned())
+        .map(|x| {
+            x.to_str()
+                .expect("non-UTF8 filenames are not supported")
+                .to_owned()
+        })
         .filter(|x| !x.contains("--json"))
         .map(|x| {
             if x.contains("--error-format") {
