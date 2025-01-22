@@ -6,7 +6,7 @@
 mod analysis;
 mod ast_parser;
 mod compiler;
-mod graph;
+mod graphs;
 
 extern crate rustc_ast;
 extern crate rustc_driver;
@@ -22,10 +22,11 @@ use cargo::{
     util::homedir,
     GlobalContext,
 };
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use compiler::{cargo_ast, get_compiler_args, run_compiler, AnalysisCallbacks};
-use graph::CallGraph;
+use graphs::CallGraph;
 use std::{
+    fmt::Display,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -36,12 +37,32 @@ struct Args {
     /// Location of manifest file of project to analyze
     manifest: PathBuf,
 
-    /// Location to write dotfile of graph to
-    output_file: PathBuf,
+    #[arg(value_enum)]
+    graph_types: Vec<GraphType>,
+}
 
-    /// Provide full call graph instead of propagation graph
-    #[arg(long)]
-    call_graph: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum GraphType {
+    /// Output call graph
+    Call,
+    /// Output chain graph of result-type errors
+    ErrorChain,
+    /// Output chain graph of panic-type errors
+    PanicChain,
+}
+
+impl Display for GraphType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Call => "call",
+                Self::ErrorChain => "error-chain",
+                Self::PanicChain => "panic-chain",
+            },
+        )
+    }
 }
 
 /// Entry point, first sets up the compiler, and then runs it using the provided arguments.
@@ -80,8 +101,9 @@ fn main() {
 
     // This allows tools to enable rust logging without having to magically match rustc’s tracing crate version.
     rustc_driver::init_rustc_env_logger(&early_dcx);
+    let package_name = workspace.current().expect("impossible").name().to_string();
     let mut callbacks = AnalysisCallbacks::new(Arc::new(Mutex::new(CallGraph::new(String::from(
-        &*workspace.current().expect("impossible").name(),
+        &package_name,
     )))));
     // Run the compiler using the retrieved args.
     let cwd = std::env::current_dir().expect("cwd invalid");
@@ -132,25 +154,35 @@ fn main() {
     call_graph.attach_panic_info(&parsed_asts);
 
     // Parse graph to show chains
-    let chain_graph = calls_to_chains::to_chains(&call_graph);
-    let dot = if args.call_graph {
-        call_graph.to_dot()
-    } else {
-        chain_graph.to_dot()
-    };
+    let error_chain_graph = calls_to_chains::to_error_chains(&call_graph);
 
+    let panic_chain_graph = calls_to_chains::to_panic_chains(&call_graph);
+
+    for graph_type in args.graph_types {
+        write_out(
+            &match graph_type {
+                GraphType::Call => call_graph.to_dot(),
+                GraphType::ErrorChain => error_chain_graph.to_dot(),
+                GraphType::PanicChain => panic_chain_graph.to_dot(),
+            },
+            &package_name,
+            graph_type,
+        );
+    }
+}
+
+fn write_out(graph: &str, name: &str, graph_type: GraphType) {
     println!("Writing graph...");
 
-    match std::fs::write(&args.output_file, dot.clone()) {
+    let output_file = format!("{name}-{graph_type}.dot");
+    match std::fs::write(&output_file, graph) {
         Ok(()) => {
             println!("Done!");
-            println!("Wrote to {}", &args.output_file.display());
+            println!("Wrote to {output_file}");
         }
         Err(e) => {
             eprintln!("Could not write output!");
             eprintln!("{e}");
-            eprintln!();
-            println!("{dot}");
         }
     }
 }

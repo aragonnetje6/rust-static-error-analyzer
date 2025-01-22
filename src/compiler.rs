@@ -12,7 +12,7 @@ use cargo::{
 use cargo_util::ProcessBuilder;
 use rustc_driver::Compilation;
 
-use crate::{analysis, graph::CallGraph};
+use crate::{analysis, graphs::CallGraph};
 
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
 pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> Vec<ProcessBuilder> {

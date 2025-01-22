@@ -151,57 +151,47 @@ impl<'a> dot::GraphWalk<'a, CallNode, CallEdge> for CallGraph {
 }
 
 #[derive(Debug, Clone)]
-pub struct ChainGraph {
-    pub nodes: Vec<ChainNode>,
-    pub edges: Vec<ChainEdge>,
+pub struct ErrorChainGraph {
+    pub nodes: Vec<ErrorChainNode>,
+    pub edges: Vec<ErrorChainEdge>,
     pub crate_name: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct ChainNode {
+pub struct ErrorChainNode {
     id: usize,
     label: String,
-    panics: PanicInfo,
 }
 
 #[derive(Debug, Clone)]
-pub struct ChainEdge {
+pub struct ErrorChainEdge {
     from: usize,
     to: usize,
     label: Option<String>,
 }
 
-impl<'a> dot::Labeller<'a, ChainNode, ChainEdge> for ChainGraph {
+impl<'a> dot::Labeller<'a, ErrorChainNode, ErrorChainEdge> for ErrorChainGraph {
     fn graph_id(&'a self) -> Id<'a> {
         let mut name: String = self.crate_name.clone();
         name.retain(|e| e.is_ascii_alphanumeric() || e == '_');
         Id::new(format!("error_propagation_{name}_chains")).expect("invalid graph ID")
     }
 
-    fn node_id(&'a self, n: &ChainNode) -> Id<'a> {
-        Id::new(format!("n{:?}", n.id)).expect("invalid node ID")
+    fn node_id(&'a self, n: &ErrorChainNode) -> Id<'a> {
+        Id::new(n.id.to_string()).expect("invalid node ID")
     }
 
-    fn node_label(&self, n: &ChainNode) -> LabelText<'a> {
+    fn node_label(&self, n: &ErrorChainNode) -> LabelText<'a> {
         LabelText::label(n.label.clone())
     }
 
-    fn edge_label(&self, e: &ChainEdge) -> LabelText<'a> {
+    fn edge_label(&self, e: &ErrorChainEdge) -> LabelText<'a> {
         LabelText::label(e.label.clone().unwrap_or(String::from("unknown")))
-    }
-
-    fn node_color(&'a self, node: &ChainNode) -> Option<LabelText<'a>> {
-        match (node.panics.explicit_invocation, node.panics.doc_section) {
-            (true, true) => Some(LabelText::label("purple")),
-            (true, false) => Some(LabelText::label("red")),
-            (false, true) => Some(LabelText::label("blue")),
-            (false, false) => None,
-        }
     }
 }
 
-impl<'a> dot::GraphWalk<'a, ChainNode, ChainEdge> for ChainGraph {
-    fn nodes(&'a self) -> Nodes<'a, ChainNode> {
+impl<'a> dot::GraphWalk<'a, ErrorChainNode, ErrorChainEdge> for ErrorChainGraph {
+    fn nodes(&'a self) -> Nodes<'a, ErrorChainNode> {
         let mut nodes = vec![];
         for edge in &self.edges {
             if !nodes.contains(&self.nodes[edge.from]) {
@@ -214,15 +204,15 @@ impl<'a> dot::GraphWalk<'a, ChainNode, ChainEdge> for ChainGraph {
         Cow::Owned(nodes)
     }
 
-    fn edges(&'a self) -> Edges<'a, ChainEdge> {
+    fn edges(&'a self) -> Edges<'a, ErrorChainEdge> {
         Cow::Owned(self.edges.clone())
     }
 
-    fn source(&'a self, edge: &ChainEdge) -> ChainNode {
+    fn source(&'a self, edge: &ErrorChainEdge) -> ErrorChainNode {
         self.nodes[edge.to].clone()
     }
 
-    fn target(&'a self, edge: &ChainEdge) -> ChainNode {
+    fn target(&'a self, edge: &ErrorChainEdge) -> ErrorChainNode {
         self.nodes[edge.from].clone()
     }
 }
@@ -423,10 +413,10 @@ impl PartialEq for CallEdge {
     }
 }
 
-impl ChainGraph {
+impl ErrorChainGraph {
     /// Create a new, empty graph.
     pub fn new(crate_name: String) -> Self {
-        ChainGraph {
+        ErrorChainGraph {
             nodes: Vec::new(),
             edges: Vec::new(),
             crate_name,
@@ -434,7 +424,7 @@ impl ChainGraph {
     }
 
     pub fn add_edge(&mut self, from: usize, to: usize, label: Option<String>) {
-        self.edges.push(ChainEdge::new(from, to, label));
+        self.edges.push(ErrorChainEdge::new(from, to, label));
     }
 
     /// Convert this graph to dot representation.
@@ -447,34 +437,180 @@ impl ChainGraph {
     pub fn add_node_from_call_node(&mut self, node: CallNode) -> usize {
         let id = self.nodes.len();
 
-        self.nodes.push(ChainNode::new(id, node.label, node.panics));
+        self.nodes.push(ErrorChainNode::new(id, node.label));
 
         id
     }
 }
 
-impl ChainNode {
+impl ErrorChainNode {
     /// Create a new node.
-    fn new(id: usize, label: String, panics: PanicInfo) -> Self {
-        ChainNode { id, label, panics }
+    fn new(id: usize, label: String) -> Self {
+        ErrorChainNode { id, label }
     }
 }
 
-impl ChainEdge {
+impl ErrorChainEdge {
     /// Create a new edge.
     pub fn new(from: usize, to: usize, label: Option<String>) -> Self {
-        ChainEdge { from, to, label }
+        ErrorChainEdge { from, to, label }
     }
 }
 
-impl PartialEq for ChainNode {
+impl PartialEq for ErrorChainNode {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl PartialEq for ChainEdge {
+impl PartialEq for ErrorChainEdge {
     fn eq(&self, other: &Self) -> bool {
         self.to == other.to && self.from == other.from
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PanicChainGraph {
+    pub nodes: Vec<PanicChainNode>,
+    pub edges: Vec<PanicChainEdge>,
+    pub crate_name: String,
+}
+
+impl<'a> dot::Labeller<'a, PanicChainNode, PanicChainEdge> for PanicChainGraph {
+    fn graph_id(&'a self) -> Id<'a> {
+        let mut name: String = self.crate_name.clone();
+        name.retain(|e| e.is_ascii_alphanumeric() || e == '_');
+        Id::new(format!("error_propagation_{name}")).expect("invalid graph ID")
+    }
+
+    fn node_id(&'a self, n: &PanicChainNode) -> Id<'a> {
+        Id::new(n.id.to_string()).expect("invalid node id")
+    }
+
+    fn node_label(&'a self, n: &PanicChainNode) -> LabelText<'a> {
+        LabelText::label(n.label.clone())
+    }
+
+    fn node_color(&'a self, n: &PanicChainNode) -> Option<LabelText<'a>> {
+        match (n.panics.explicit_invocation, n.panics.doc_section) {
+            (true, true) => Some(LabelText::label("purple")),
+            (true, false) => Some(LabelText::label("red")),
+            (false, true) => Some(LabelText::label("blue")),
+            (false, false) => None,
+        }
+    }
+
+    fn edge_color(&'a self, e: &PanicChainEdge) -> Option<LabelText<'a>> {
+        if e.may_propagate_panic && e.catches_panic {
+            Some(LabelText::label("purple"))
+        } else if e.may_propagate_panic {
+            Some(LabelText::label("red"))
+        } else if e.catches_panic {
+            Some(LabelText::label("blue"))
+        } else {
+            None
+        }
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::Digraph
+    }
+}
+
+impl<'a> dot::GraphWalk<'a, PanicChainNode, PanicChainEdge> for PanicChainGraph {
+    fn nodes(&'a self) -> Nodes<'a, PanicChainNode> {
+        Cow::Borrowed(&self.nodes)
+    }
+
+    fn edges(&'a self) -> Edges<'a, PanicChainEdge> {
+        Cow::Borrowed(&self.edges)
+    }
+
+    fn source(&'a self, edge: &PanicChainEdge) -> PanicChainNode {
+        self.nodes[edge.from].clone()
+    }
+
+    fn target(&'a self, edge: &PanicChainEdge) -> PanicChainNode {
+        self.nodes[edge.to].clone()
+    }
+}
+
+impl PanicChainGraph {
+    /// Create a new, empty graph.
+    pub fn new(crate_name: String) -> Self {
+        Self {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            crate_name,
+        }
+    }
+
+    pub fn add_edge(
+        &mut self,
+        from: usize,
+        to: usize,
+        may_propagate_panic: bool,
+        catches_panic: bool,
+    ) {
+        self.edges.push(PanicChainEdge::new(
+            from,
+            to,
+            may_propagate_panic,
+            catches_panic,
+        ));
+    }
+
+    /// Convert this graph to dot representation.
+    pub fn to_dot(&self) -> String {
+        let mut buf = Vec::new();
+        dot::render(self, &mut buf).expect("graph rendering error");
+        String::from_utf8(buf).expect("graph string invalid")
+    }
+
+    pub fn add_node_from_call_node(&mut self, node: CallNode) -> usize {
+        let id = self.nodes.len();
+
+        self.nodes
+            .push(PanicChainNode::new(id, node.label, node.panics));
+
+        id
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PanicChainNode {
+    id: usize,
+    pub label: String,
+    pub panics: PanicInfo,
+}
+
+impl PanicChainNode {
+    pub fn new(id: usize, label: String, panics: PanicInfo) -> Self {
+        Self { id, label, panics }
+    }
+}
+
+impl PartialEq for PanicChainNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PanicChainEdge {
+    pub from: usize,
+    pub to: usize,
+    pub may_propagate_panic: bool,
+    pub catches_panic: bool,
+}
+
+impl PanicChainEdge {
+    pub fn new(from: usize, to: usize, may_propagate_panic: bool, catches_panic: bool) -> Self {
+        Self {
+            from,
+            to,
+            may_propagate_panic,
+            catches_panic,
+        }
     }
 }

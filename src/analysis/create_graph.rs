@@ -7,7 +7,7 @@ use rustc_hir::{
 };
 use rustc_middle::ty::TyCtxt;
 
-use crate::graph::{CallEdge, CallGraph, CallNodeKind, PanicInfo};
+use crate::graphs::{CallEdge, CallGraph, CallNodeKind, PanicInfo};
 
 use super::panics;
 

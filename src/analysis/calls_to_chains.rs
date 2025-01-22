@@ -1,8 +1,8 @@
-use crate::graph::{CallEdge, CallGraph, ChainGraph};
+use crate::graphs::{CallEdge, CallGraph, ErrorChainGraph, PanicChainGraph};
 use std::collections::{hash_map::Entry, HashMap};
 
-pub fn to_chains(call_graph: &CallGraph) -> ChainGraph {
-    let mut new_graph = ChainGraph::new(call_graph.crate_name.clone());
+pub fn to_error_chains(call_graph: &CallGraph) -> ErrorChainGraph {
+    let mut new_graph = ErrorChainGraph::new(call_graph.crate_name.clone());
 
     let mut count: usize = 0;
     let mut max_size: usize = 0;
@@ -105,4 +105,8 @@ fn get_chain_from_edge(
     }
 
     (res, max_depth)
+}
+
+pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
+    todo!()
 }

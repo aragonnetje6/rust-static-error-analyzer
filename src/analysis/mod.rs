@@ -5,7 +5,7 @@ mod types;
 
 use rustc_middle::ty::TyCtxt;
 
-use crate::graph::CallGraph;
+use crate::graphs::CallGraph;
 
 /// Analysis steps:
 ///

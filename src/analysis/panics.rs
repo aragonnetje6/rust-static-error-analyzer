@@ -1,7 +1,7 @@
 use rustc_hir::{Block, BodyId, Expr, ExprKind, LetExpr, LetStmt, QPath, StmtKind, StructTailExpr};
 use rustc_middle::ty::TyCtxt;
 
-use crate::graph::PanicInfo;
+use crate::graphs::PanicInfo;
 
 use super::create_graph::get_node_kind_from_path;
 
