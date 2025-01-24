@@ -484,7 +484,7 @@ impl<'a> dot::Labeller<'a, PanicChainNode, PanicChainEdge> for PanicChainGraph {
     }
 
     fn node_id(&'a self, n: &PanicChainNode) -> Id<'a> {
-        Id::new(n.id.to_string()).expect("invalid node id")
+        Id::new(format!("n{}", n.id)).expect("invalid node id")
     }
 
     fn node_label(&'a self, n: &PanicChainNode) -> LabelText<'a> {
@@ -501,14 +501,19 @@ impl<'a> dot::Labeller<'a, PanicChainNode, PanicChainEdge> for PanicChainGraph {
     }
 
     fn edge_color(&'a self, e: &PanicChainEdge) -> Option<LabelText<'a>> {
-        if e.may_propagate_panic && e.catches_panic {
-            Some(LabelText::label("purple"))
-        } else if e.may_propagate_panic {
-            Some(LabelText::label("red"))
-        } else if e.catches_panic {
-            Some(LabelText::label("blue"))
-        } else {
-            None
+        match (
+            e.edge_panic_info.propagates_doc_panic,
+            e.edge_panic_info.propagates_invoked_panic,
+            e.edge_panic_info.catches_panic,
+        ) {
+            (true, true, true) => Some(LabelText::label("brown")),
+            (true, true, false) => Some(LabelText::label("purple")),
+            (true, false, true) => Some(LabelText::label("green")),
+            (true, false, false) => Some(LabelText::label("blue")),
+            (false, true, true) => Some(LabelText::label("orange")),
+            (false, true, false) => Some(LabelText::label("red")),
+            (false, false, true) => Some(LabelText::label("yellow")),
+            (false, false, false) => None,
         }
     }
 
@@ -537,27 +542,12 @@ impl<'a> dot::GraphWalk<'a, PanicChainNode, PanicChainEdge> for PanicChainGraph 
 
 impl PanicChainGraph {
     /// Create a new, empty graph.
-    pub fn new(crate_name: String) -> Self {
+    pub fn new(nodes: Vec<PanicChainNode>, edges: Vec<PanicChainEdge>, crate_name: String) -> Self {
         Self {
-            nodes: Vec::new(),
-            edges: Vec::new(),
+            nodes,
+            edges,
             crate_name,
         }
-    }
-
-    pub fn add_edge(
-        &mut self,
-        from: usize,
-        to: usize,
-        may_propagate_panic: bool,
-        catches_panic: bool,
-    ) {
-        self.edges.push(PanicChainEdge::new(
-            from,
-            to,
-            may_propagate_panic,
-            catches_panic,
-        ));
     }
 
     /// Convert this graph to dot representation.
@@ -565,15 +555,6 @@ impl PanicChainGraph {
         let mut buf = Vec::new();
         dot::render(self, &mut buf).expect("graph rendering error");
         String::from_utf8(buf).expect("graph string invalid")
-    }
-
-    pub fn add_node_from_call_node(&mut self, node: CallNode) -> usize {
-        let id = self.nodes.len();
-
-        self.nodes
-            .push(PanicChainNode::new(id, node.label, node.panics));
-
-        id
     }
 }
 
@@ -588,6 +569,10 @@ impl PanicChainNode {
     pub fn new(id: usize, label: String, panics: PanicInfo) -> Self {
         Self { id, label, panics }
     }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
 }
 
 impl PartialEq for PanicChainNode {
@@ -600,16 +585,55 @@ impl PartialEq for PanicChainNode {
 pub struct PanicChainEdge {
     pub from: usize,
     pub to: usize,
-    pub may_propagate_panic: bool,
-    pub catches_panic: bool,
+    pub edge_panic_info: EdgePanicInfo,
 }
 
 impl PanicChainEdge {
-    pub fn new(from: usize, to: usize, may_propagate_panic: bool, catches_panic: bool) -> Self {
+    pub fn new(from: usize, to: usize, edge_panic_info: EdgePanicInfo) -> Self {
         Self {
             from,
             to,
-            may_propagate_panic,
+            edge_panic_info,
+        }
+    }
+}
+
+impl PartialEq for PanicChainEdge {
+    fn eq(&self, other: &Self) -> bool {
+        self.from == other.from && self.to == other.to
+    }
+}
+
+impl Eq for PanicChainEdge {}
+
+impl PartialOrd for PanicChainEdge {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PanicChainEdge {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.from.cmp(&other.from).then(self.to.cmp(&other.to))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EdgePanicInfo {
+    pub propagates_doc_panic: bool,
+    pub propagates_invoked_panic: bool,
+    pub catches_panic: bool,
+}
+
+impl EdgePanicInfo {
+    pub fn new(
+        propagates_doc_panic: bool,
+        propagates_invoked_panic: bool,
+        catches_panic: bool,
+    ) -> Self {
+        Self {
+            propagates_doc_panic,
+            propagates_invoked_panic,
             catches_panic,
         }
     }

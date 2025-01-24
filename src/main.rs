@@ -78,7 +78,7 @@ fn main() {
         .expect("manifest path failed to resolve");
 
     let mut shell = Shell::new();
-    shell.set_verbosity(cargo::core::Verbosity::Quiet);
+    shell.set_verbosity(cargo::core::Verbosity::Verbose);
     let gctx = GlobalContext::new(
         shell,
         manifest_path
