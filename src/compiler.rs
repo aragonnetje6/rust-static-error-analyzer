@@ -104,10 +104,6 @@ impl Executor for GetArgumentExecutor {
         }
         Ok(())
     }
-
-    fn force_rebuild(&self, unit: &cargo::core::compiler::Unit) -> bool {
-        dbg!(unit.is_local())
-    }
 }
 
 fn get_build_arguments(gctx: &GlobalContext, workspace: &Workspace) -> Vec<ProcessBuilder> {
