@@ -17,7 +17,7 @@ use crate::{analysis, graphs::CallGraph};
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
 pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> Vec<ProcessBuilder> {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
-    // cargo_clean(workspace, gctx).expect("cleaning failed");
+    cargo_clean(workspace, gctx).expect("cleaning failed");
     get_build_arguments(gctx, workspace)
 }
 
