@@ -78,7 +78,7 @@ fn main() {
         .expect("manifest path failed to resolve");
 
     let mut shell = Shell::new();
-    shell.set_verbosity(cargo::core::Verbosity::Verbose);
+    shell.set_verbosity(cargo::core::Verbosity::Quiet);
     let gctx = GlobalContext::new(
         shell,
         manifest_path
@@ -108,7 +108,14 @@ fn main() {
     // Run the compiler using the retrieved args.
     let cwd = std::env::current_dir().expect("cwd invalid");
     std::env::set_current_dir(workspace.root()).expect("root path invalid");
-    for process_builder in process_builders {
+    for process_builder in process_builders.lib_commands {
+        run_compiler(
+            &process_builder,
+            &mut callbacks,
+            using_internal_features.clone(),
+        );
+    }
+    for process_builder in process_builders.bin_commands {
         run_compiler(
             &process_builder,
             &mut callbacks,
@@ -122,7 +129,7 @@ fn main() {
         .expect("impossible")
         .targets()
         .iter()
-        .filter(|target| !target.is_test())
+        .filter(|target| target.is_bin() || target.is_lib())
         .map(|target| cargo_ast(&manifest_path, target))
         .collect();
 

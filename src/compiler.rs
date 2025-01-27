@@ -5,20 +5,19 @@ use std::{
 };
 
 use cargo::{
-    core::{compiler::Executor, Target, Workspace},
+    core::{Package, Target, Workspace},
     util::interning::InternedString,
     CargoResult, GlobalContext,
 };
-use cargo_util::ProcessBuilder;
 use rustc_driver::Compilation;
 
 use crate::{analysis, graphs::CallGraph};
 
 /// Get the compiler arguments used to compile the package by first running `cargo clean` and then `cargo build -vv`.
-pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> Vec<ProcessBuilder> {
+pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> CompilerCommands {
     println!("Using {}!", cargo_version().trim_end_matches('\n'));
     cargo_clean(workspace, gctx).expect("cleaning failed");
-    get_build_arguments(gctx, workspace)
+    get_build_arguments(workspace.current().expect("no current package"))
 }
 
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
@@ -62,7 +61,7 @@ pub fn cargo_ast(manifest_path: &Path, target: &Target) -> String {
 
     if output.status.code() != Some(0) {
         eprintln!("Could not get AST!");
-        println!("{stderr:?}");
+        println!("{stderr}");
     }
 
     stdout
@@ -78,76 +77,222 @@ fn cargo_version() -> String {
     String::from_utf8(output.stdout).expect("Invalid UTF8!")
 }
 
-#[derive(Debug, Default)]
-struct GetArgumentExecutor {
-    result: Mutex<Vec<ProcessBuilder>>,
+#[derive(Debug)]
+pub struct CompilerCommands {
+    pub bin_commands: Vec<Vec<String>>,
+    pub lib_commands: Vec<Vec<String>>,
 }
 
-impl Executor for GetArgumentExecutor {
-    fn exec(
-        &self,
-        cmd: &ProcessBuilder,
-        _id: cargo::core::PackageId,
-        _target: &cargo::core::Target,
-        _mode: cargo::core::compiler::CompileMode,
-        _on_stdout_line: &mut dyn FnMut(&str) -> CargoResult<()>,
-        _on_stderr_line: &mut dyn FnMut(&str) -> CargoResult<()>,
-    ) -> CargoResult<()> {
-        if cmd
-            .get_env("CARGO_PRIMARY_PACKAGE")
-            .is_some_and(|x| x == "1")
-        {
-            self.result
-                .lock()
-                .expect("mutex poisoned, something crashed")
-                .push(cmd.clone());
-        }
-        Ok(())
+fn get_build_arguments(package: &Package) -> CompilerCommands {
+    let build_output = cargo_build_verbose(package);
+    let invocations = get_rustc_invocations(&build_output, package.targets());
+    let bin_commands = invocations
+        .bin_invocations
+        .iter()
+        .map(|invocation| split_args(invocation, package))
+        .collect();
+    let lib_commands = invocations
+        .lib_invocations
+        .iter()
+        .map(|invocation| split_args(invocation, package))
+        .collect();
+    CompilerCommands {
+        bin_commands,
+        lib_commands,
     }
 }
 
-fn get_build_arguments(gctx: &GlobalContext, workspace: &Workspace) -> Vec<ProcessBuilder> {
+/// Run `cargo build -v` on the given manifest.
+fn cargo_build_verbose(package: &Package) -> String {
     println!("Building package...");
-    let executor = Arc::new(GetArgumentExecutor::default());
-    let options = cargo::ops::CompileOptions::new(gctx, cargo::core::compiler::CompileMode::Build)
-        .expect("could not create options????");
-    cargo::ops::compile_with_exec(
-        workspace,
-        &options,
-        &(executor.clone() as Arc<dyn Executor>),
-    )
-    .expect("Cargo failed to build package");
-    Arc::into_inner(executor)
-        .expect("should never fail")
-        .result
-        .into_inner()
-        .expect("should never fail")
+    let output = Command::new("cargo")
+        .arg("build")
+        .arg("-v")
+        .arg("--manifest-path")
+        .arg(package.manifest_path())
+        .current_dir(package.root())
+        .output()
+        .expect("Could not build!");
+    let stderr = String::from_utf8(output.stderr).expect("Invalid UTF8!");
+    if output.status.code() != Some(0) {
+        eprintln!("Could not (fully) build package!");
+        eprintln!();
+        for line in stderr.split('\n') {
+            if line.starts_with("error") {
+                eprintln!("{line}");
+            }
+        }
+        eprintln!();
+        eprintln!("Trying to continue...");
+    }
+    stderr
+}
+
+#[derive(Debug)]
+struct CompilerInvocations {
+    bin_invocations: Vec<String>,
+    lib_invocations: Vec<String>,
+}
+
+fn get_rustc_invocations(build_output: &str, targets: &[Target]) -> CompilerInvocations {
+    let bin_names: Vec<&str> = targets
+        .iter()
+        .filter(|target| target.is_bin())
+        .map(Target::name)
+        .collect();
+    let lib_names: Vec<&str> = targets
+        .iter()
+        .filter(|target| target.is_lib())
+        .map(Target::name)
+        .collect();
+    let bin_invocations = build_output
+        .split('\n')
+        .flat_map(|line| {
+            line.split('`').flat_map(|part| {
+                part.split("&& ")
+                    .filter(|command| {
+                        command.contains("rustc")
+                            && bin_names
+                                .iter()
+                                .any(|name| command.contains(&format!("--crate-name {name}")))
+                            && command.contains("--crate-type bin")
+                    })
+                    .map(String::from)
+            })
+        })
+        .collect();
+    let lib_invocations = build_output
+        .split('\n')
+        .flat_map(|line| {
+            line.split('`').flat_map(|part| {
+                part.split("&& ")
+                    .filter(|command| {
+                        command.contains("rustc")
+                            && lib_names
+                                .iter()
+                                .any(|name| command.contains(&format!("--crate-name {name}")))
+                            && command.contains("--crate-type lib")
+                    })
+                    .map(String::from)
+            })
+        })
+        .collect();
+    CompilerInvocations {
+        bin_invocations,
+        lib_invocations,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum StringArg {
+    None,
+    SingleQuoted(String),
+    DoubleQouted(String),
+}
+
+/// Split up individual arguments from the command.
+fn split_args(command: &str, package: &Package) -> Vec<String> {
+    let mut res = vec![];
+    let mut temp = StringArg::None;
+    // Split on ' '
+    for arg in command.split(' ') {
+        let mut arg = arg.to_owned();
+        // If this is the path to main.rs, prepend the relative path to the manifest, stripping away Cargo.toml
+        if arg.contains(&package.manifest_path().to_string_lossy().to_string()) {
+            arg = format!("{}/{arg}", package.root().to_string_lossy());
+        }
+        temp = match temp {
+            StringArg::None => {
+                if arg.starts_with('"') && arg.ends_with('"') {
+                    res.push(
+                        arg.strip_prefix('"')
+                            .and_then(|x| x.strip_suffix('"'))
+                            .expect("unquoting failure")
+                            .to_owned(),
+                    );
+                    StringArg::None
+                } else if arg.starts_with('\'') && arg.ends_with('\'') {
+                    res.push(
+                        arg.strip_prefix('\'')
+                            .and_then(|x| x.strip_suffix('\''))
+                            .expect("unquoting failure")
+                            .to_owned(),
+                    );
+                    StringArg::None
+                } else if arg.starts_with('"') {
+                    StringArg::DoubleQouted(
+                        arg.strip_prefix('"').expect("unquoting failure").to_owned(),
+                    )
+                } else if arg.starts_with('\'') {
+                    StringArg::SingleQuoted(
+                        arg.strip_prefix('\'')
+                            .expect("unquoting failure")
+                            .to_owned(),
+                    )
+                } else {
+                    res.push(arg);
+                    StringArg::None
+                }
+            }
+            StringArg::SingleQuoted(mut temp) => {
+                temp.push(' ');
+                if arg.ends_with('\'') {
+                    temp.push_str(arg.strip_suffix('\'').expect("unquoting failure"));
+                    res.push(temp);
+                    StringArg::None
+                } else {
+                    temp.push_str(&arg);
+                    temp.push(' ');
+                    StringArg::SingleQuoted(temp)
+                }
+            }
+            StringArg::DoubleQouted(mut temp) => {
+                temp.push(' ');
+                if arg.ends_with('"') {
+                    temp.push_str(arg.strip_suffix('"').expect("unquoting failure"));
+                    res.push(temp);
+                    StringArg::None
+                } else {
+                    temp.push_str(&arg);
+                    StringArg::DoubleQouted(temp)
+                }
+            }
+        };
+    }
+    // Overwrite error format args
+    for i in 0..res.len() {
+        if i >= res.len() {
+            break;
+        }
+        res[i] = res[i].replace("\\\"", "\"");
+        if res[i].starts_with("--error-format=") {
+            res[i] = String::from("--error-format=short");
+        }
+        if res[i].starts_with("--json=") {
+            res.remove(i);
+        }
+    }
+    res
 }
 
 pub fn run_compiler(
-    process_builder: &ProcessBuilder,
+    process_builder: &[String],
     callbacks: &mut (dyn rustc_driver::Callbacks + Send),
     using_internal_features: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> i32 {
     println!("Running compiler...");
 
     let mut args = process_builder
-        .get_args()
-        .map(|x| {
-            x.to_str()
-                .expect("non-UTF8 filenames are not supported")
-                .to_owned()
-        })
+        .iter()
         .filter(|x| !x.contains("--json"))
         .map(|x| {
             if x.contains("--error-format") {
                 String::from("--error-format=short")
             } else {
-                x
+                x.clone()
             }
         })
         .collect::<Vec<String>>();
-    args.insert(0, String::new());
     args.push(String::from("--cap-lints"));
     args.push(String::from("allow"));
     rustc_driver::catch_with_exit_code(move || {

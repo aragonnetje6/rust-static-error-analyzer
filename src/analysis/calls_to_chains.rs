@@ -1,8 +1,8 @@
 use crate::graphs::{
-    CallEdge, CallGraph, CallNode, EdgePanicInfo, ErrorChainGraph, PanicChainEdge, PanicChainGraph,
+    CallEdge, CallGraph, EdgePanicInfo, ErrorChainGraph, PanicChainEdge, PanicChainGraph,
     PanicChainNode,
 };
-use std::collections::{hash_map::Entry, BTreeMap, HashMap};
+use std::collections::{hash_map::Entry, BTreeSet, HashMap};
 
 pub fn to_error_chains(call_graph: &CallGraph) -> ErrorChainGraph {
     let mut new_graph = ErrorChainGraph::new(call_graph.crate_name.clone());
@@ -99,53 +99,93 @@ fn get_error_chain_from_edge(
 }
 
 pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
-    let mut nodes = BTreeMap::new();
-    let mut edges = Vec::new();
-    let mut panic_chains: Vec<Vec<PanicChainEdge>> = Vec::new();
-
-    for call_node in call_graph
+    let mut nodes: Vec<_> = call_graph
         .nodes
         .iter()
-        .filter(|node| node.panics.explicit_invocation || node.panics.doc_section)
-    {
-        if !nodes.contains_key(&call_node.id()) {
-            nodes.insert(
-                call_node.id(),
-                PanicChainNode::new(
-                    nodes.len(),
-                    call_node.label.clone(),
-                    call_node.panics.clone(),
-                ),
-            );
-            add_callers_to_panic_graph(
-                call_graph,
-                &mut nodes,
+        .map(|node| PanicChainNode::new(node.id(), node.label.clone(), node.panics.clone()))
+        .collect();
+    let mut edges: Vec<PanicChainEdge> = call_graph
+        .edges
+        .iter()
+        .map(|edge| PanicChainEdge::new(edge.from, edge.to, EdgePanicInfo::default()))
+        .collect();
+
+    for node in &nodes {
+        for edge in edges
+            .iter_mut()
+            .filter(|edge| edge.from == node.id())
+            .filter(|edge| {
+                node.panics.catches.contains(
+                    &nodes
+                        .iter()
+                        .find(|node| node.id() == edge.to)
+                        .expect("edge references nonexistent node")
+                        .label,
+                )
+            })
+        {
+            edge.edge_panic_info.catches_panic = true;
+        }
+    }
+    for node in &nodes {
+        if node.panics.explicit_invocation || node.panics.doc_section {
+            propagate_panic_kind(
                 &mut edges,
-                call_node,
-                call_node.panics.explicit_invocation,
-                call_node.panics.doc_section,
+                node.id(),
+                node.panics.explicit_invocation,
+                node.panics.doc_section,
             );
         }
-        panic_chains.extend(dbg!(get_chains_from_node(
-            &edges,
-            nodes.get(&call_node.id()).expect("just added").id(),
-        )));
     }
 
+    // trim
+    edges.retain(|edge| {
+        edge.edge_panic_info.propagates_doc_panic
+            || edge.edge_panic_info.propagates_invoked_panic
+            || edge.edge_panic_info.catches_panic
+    });
+    nodes.retain(|node| {
+        edges
+            .iter()
+            .any(|edge| node.id() == edge.to || node.id() == edge.from)
+    });
+
+    // renumber
+    let id_map: HashMap<usize, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, node)| (node.id(), i))
+        .collect();
+    for node in &mut nodes {
+        node.id = id_map[&node.id];
+    }
+    for edge in &mut edges {
+        edge.from = id_map[&edge.from];
+        edge.to = id_map[&edge.to];
+    }
+
+    let panic_chains: Vec<Vec<PanicChainEdge>> = nodes
+        .iter()
+        .filter(|node| node.panics.explicit_invocation || node.panics.doc_section)
+        .flat_map(|node| get_chains_from_node(&edges, node.id()))
+        .collect();
+
+    print_panic_stats(&nodes, &panic_chains);
+    PanicChainGraph::new(nodes, edges, call_graph.crate_name.clone())
+}
+
+fn print_panic_stats(nodes: &[PanicChainNode], panic_chains: &[Vec<PanicChainEdge>]) {
     let panic_invocations = nodes
-        .values()
+        .iter()
         .filter(|node| node.panics.explicit_invocation)
         .count();
     let undocumented_invocations = nodes
-        .values()
+        .iter()
         .filter(|node| node.panics.explicit_invocation && !node.panics.doc_section)
         .count();
-    let documented_panics = nodes
-        .values()
-        .filter(|node| node.panics.doc_section)
-        .count();
+    let documented_panics = nodes.iter().filter(|node| node.panics.doc_section).count();
     let uninvoked_documented = nodes
-        .values()
+        .iter()
         .filter(|node| !node.panics.explicit_invocation && node.panics.doc_section)
         .count();
 
@@ -165,13 +205,17 @@ pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
     //     "The longest panic path consists of {} chained function calls.",
     //     panic_chains.iter().map(Vec::len).max().unwrap_or_default()
     // );
-    // println!("The average chain consists of {} function calls.", panic_chains.iter().);
+    println!(
+        "The average chain consists of {} function calls.",
+        if (panic_chains.iter().map(|x| x.len() as f64).sum::<f64>() / panic_chains.len() as f64)
+            .is_nan()
+        {
+            0f64
+        } else {
+            panic_chains.iter().map(|x| x.len() as f64).sum::<f64>() / panic_chains.len() as f64
+        }
+    );
     println!();
-    PanicChainGraph::new(
-        nodes.into_values().collect(),
-        edges,
-        call_graph.crate_name.clone(),
-    )
 }
 
 fn get_chains_from_node(edges: &[PanicChainEdge], id: usize) -> Vec<Vec<PanicChainEdge>> {
@@ -189,10 +233,10 @@ fn get_chains_from_node(edges: &[PanicChainEdge], id: usize) -> Vec<Vec<PanicCha
 }
 
 fn expand_chains(edges: &[PanicChainEdge], chain: &[PanicChainEdge]) -> Vec<Vec<PanicChainEdge>> {
-    let to = chain.last().expect("empty chain").to;
+    let from = chain.last().expect("empty chain").from;
     edges
         .iter()
-        .filter(|edge| edge.from == to)
+        .filter(|edge| edge.to == from)
         .flat_map(|edge| {
             let mut new_chain = chain.to_owned();
             new_chain.push(edge.clone());
@@ -206,48 +250,33 @@ fn expand_chains(edges: &[PanicChainEdge], chain: &[PanicChainEdge]) -> Vec<Vec<
         .collect()
 }
 
-fn add_callers_to_panic_graph(
-    call_graph: &CallGraph,
-    nodes: &mut BTreeMap<usize, PanicChainNode>,
-    edges: &mut Vec<PanicChainEdge>,
-    called_node: &CallNode,
+fn propagate_panic_kind(
+    edges: &mut [PanicChainEdge],
+    id: usize,
     explicit_invocation: bool,
     doc_section: bool,
 ) {
-    for call_edge in call_graph
-        .edges
+    let mut visited: BTreeSet<usize> = BTreeSet::new();
+    let mut stack: Vec<usize> = edges
         .iter()
-        .filter(|edge| edge.to == called_node.id())
-    {
-        let calling_node = call_graph
-            .nodes
-            .iter()
-            .find(|x| x.id() == call_edge.from)
-            .expect("invalid graph");
-        let catches_panic = calling_node.panics.catches.contains(&called_node.label);
-
-        if !nodes.contains_key(&calling_node.id()) {
-            nodes.insert(
-                calling_node.id(),
-                PanicChainNode::new(
-                    nodes.len(),
-                    calling_node.label.clone(),
-                    calling_node.panics.clone(),
-                ),
-            );
-            add_callers_to_panic_graph(
-                call_graph,
-                nodes,
-                edges,
-                calling_node,
-                calling_node.panics.explicit_invocation || explicit_invocation,
-                calling_node.panics.doc_section || doc_section,
-            );
+        .enumerate()
+        .filter(|(_, edge)| edge.to == id)
+        .map(|(i, _)| i)
+        .collect();
+    visited.extend(&stack);
+    while let Some(current) = stack.pop() {
+        edges[current].edge_panic_info.propagates_doc_panic |= doc_section;
+        edges[current].edge_panic_info.propagates_invoked_panic |= explicit_invocation;
+        if !edges[current].edge_panic_info.catches_panic {
+            let next: Vec<usize> = edges
+                .iter()
+                .enumerate()
+                .filter(|(_, edge)| edge.to == edges[current].from)
+                .map(|(i, _)| i)
+                .filter(|i| !visited.contains(i))
+                .collect();
+            stack.extend(&next);
+            visited.extend(&next);
         }
-        edges.push(PanicChainEdge::new(
-            nodes.get(&calling_node.id()).expect("just added").id(),
-            nodes.get(&called_node.id()).expect("just added").id(),
-            EdgePanicInfo::new(doc_section, explicit_invocation, catches_panic),
-        ));
     }
 }

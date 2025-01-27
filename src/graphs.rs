@@ -560,7 +560,7 @@ impl PanicChainGraph {
 
 #[derive(Debug, Clone)]
 pub struct PanicChainNode {
-    id: usize,
+    pub id: usize,
     pub label: String,
     pub panics: PanicInfo,
 }
@@ -618,23 +618,9 @@ impl Ord for PanicChainEdge {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EdgePanicInfo {
     pub propagates_doc_panic: bool,
     pub propagates_invoked_panic: bool,
     pub catches_panic: bool,
-}
-
-impl EdgePanicInfo {
-    pub fn new(
-        propagates_doc_panic: bool,
-        propagates_invoked_panic: bool,
-        catches_panic: bool,
-    ) -> Self {
-        Self {
-            propagates_doc_panic,
-            propagates_invoked_panic,
-            catches_panic,
-        }
-    }
 }
