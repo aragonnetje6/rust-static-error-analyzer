@@ -508,6 +508,11 @@ fn expr_kind(input: &str) -> IResult<&str, ()> {
             tuple_struct_parser("Become", field(expr), discard),
             alt((
                 tuple_struct_parser("FormatArgs", field(parse_format_args), discard),
+                tuple_struct_parser(
+                    "IncludedBytes",
+                    field(list(spaced(complete::digit1))),
+                    discard,
+                ),
                 tuple_struct_parser("Ret", field(option(expr)), discard),
                 tuple_struct_parser(
                     "UnsafeBinderCast",

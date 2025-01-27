@@ -132,7 +132,7 @@ fn get_label(context: TyCtxt<'_>, expr: &Expr<'_>) -> Option<String> {
         | ExprKind::Repeat(..)
         | ExprKind::Yield(..)
         | ExprKind::UnsafeBinderCast(..)
-        | ExprKind::Err(..) => unreachable!(),
+        | ExprKind::Err(..) => None,
     }
     .map(|def_id| context.def_path_str(def_id))
 }
