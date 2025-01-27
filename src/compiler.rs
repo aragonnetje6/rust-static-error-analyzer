@@ -22,7 +22,7 @@ pub fn get_compiler_args(workspace: &Workspace, gctx: &GlobalContext) -> Compile
 
 /// Run `cargo clean -p PACKAGE`, where the package name is extracted from the given manifest.
 fn cargo_clean(workspace: &Workspace, gctx: &GlobalContext) -> CargoResult<()> {
-    println!("Cleaning package...");
+    eprintln!("Cleaning package...");
     cargo::ops::clean(
         workspace,
         &cargo::ops::CleanOptions {
@@ -38,7 +38,7 @@ fn cargo_clean(workspace: &Workspace, gctx: &GlobalContext) -> CargoResult<()> {
 }
 
 pub fn cargo_ast(manifest_path: &Path, target: &Target) -> String {
-    println!("Getting AST...");
+    eprintln!("Getting AST...");
     let mut command = Command::new("cargo");
     command.arg("+nightly").arg("rustc");
     let output = if target.is_lib() {
@@ -61,7 +61,7 @@ pub fn cargo_ast(manifest_path: &Path, target: &Target) -> String {
 
     if output.status.code() != Some(0) {
         eprintln!("Could not get AST!");
-        println!("{stderr}");
+        eprintln!("{stderr}");
     }
 
     stdout
@@ -104,7 +104,7 @@ fn get_build_arguments(package: &Package) -> CompilerCommands {
 
 /// Run `cargo build -v` on the given manifest.
 fn cargo_build_verbose(package: &Package) -> String {
-    println!("Building package...");
+    eprintln!("Building package...");
     let output = Command::new("cargo")
         .arg("build")
         .arg("-v")
@@ -280,7 +280,7 @@ pub fn run_compiler(
     callbacks: &mut (dyn rustc_driver::Callbacks + Send),
     using_internal_features: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> i32 {
-    println!("Running compiler...");
+    eprintln!("Running compiler...");
 
     let mut args = process_builder
         .iter()
@@ -321,7 +321,7 @@ impl rustc_driver::Callbacks for AnalysisCallbacks {
         tcx: rustc_middle::ty::TyCtxt<'_>,
     ) -> Compilation {
         // Access type context
-        println!("Analyzing output...");
+        eprintln!("Analyzing output...");
         // Analyze the program using the type context
         let mut call_graph = self.graph.lock().expect("locking failed");
         analysis::analyze(tcx, &mut call_graph);

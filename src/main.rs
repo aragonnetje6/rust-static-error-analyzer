@@ -109,18 +109,24 @@ fn main() {
     let cwd = std::env::current_dir().expect("cwd invalid");
     std::env::set_current_dir(workspace.root()).expect("root path invalid");
     for process_builder in process_builders.lib_commands {
-        run_compiler(
+        if run_compiler(
             &process_builder,
             &mut callbacks,
             using_internal_features.clone(),
-        );
+        ) != 0
+        {
+            eprintln!("Compiling lib was unsuccessful");
+        }
     }
     for process_builder in process_builders.bin_commands {
-        run_compiler(
+        if run_compiler(
             &process_builder,
             &mut callbacks,
             using_internal_features.clone(),
-        );
+        ) != 0
+        {
+            eprintln!("Compiling bin was unsuccessful");
+        }
     }
     std::env::set_current_dir(cwd).expect("failed to reset cwd");
 
@@ -133,7 +139,7 @@ fn main() {
         .map(|target| cargo_ast(&manifest_path, target))
         .collect();
 
-    println!("Parsing ASTs...");
+    eprintln!("Parsing ASTs...");
 
     let parsed_asts: Vec<ast_parser::Crate> = asts
         .iter()
@@ -179,13 +185,13 @@ fn main() {
 }
 
 fn write_out(graph: &str, name: &str, graph_type: GraphType) {
-    println!("Writing graph...");
+    eprintln!("Writing graph...");
 
     let output_file = format!("{name}-{graph_type}.dot");
     match std::fs::write(&output_file, graph) {
         Ok(()) => {
-            println!("Done!");
-            println!("Wrote to {output_file}");
+            eprintln!("Done!");
+            eprintln!("Wrote to {output_file}");
         }
         Err(e) => {
             eprintln!("Could not write output!");
