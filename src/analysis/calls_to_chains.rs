@@ -138,6 +138,7 @@ pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
         }
     }
 
+    eprintln!("trimming...");
     // trim
     edges.retain(|edge| {
         edge.edge_panic_info.propagates_doc_panic
@@ -164,7 +165,8 @@ pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
         edge.to = id_map[&edge.to];
     }
 
-    let panic_chains: Vec<Vec<PanicChainEdge>> = nodes
+    eprintln!("chaining...");
+    let panic_chains: Vec<usize> = nodes
         .iter()
         .filter(|node| node.panics.explicit_invocation || node.panics.doc_section)
         .flat_map(|node| get_chains_from_node(&edges, node.id()))
@@ -174,7 +176,7 @@ pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
     PanicChainGraph::new(nodes, edges, call_graph.crate_name.clone())
 }
 
-fn print_panic_stats(nodes: &[PanicChainNode], panic_chains: &[Vec<PanicChainEdge>]) {
+fn print_panic_stats(nodes: &[PanicChainNode], panic_chains: &[usize]) {
     let panic_invocations = nodes
         .iter()
         .filter(|node| node.panics.explicit_invocation)
@@ -199,7 +201,7 @@ fn print_panic_stats(nodes: &[PanicChainNode], panic_chains: &[Vec<PanicChainEdg
     );
     println!(
         "The longest chain consists of {} function calls.",
-        panic_chains.iter().map(Vec::len).max().unwrap_or_default()
+        panic_chains.iter().max().copied().unwrap_or_default()
     );
     // println!(
     //     "The longest panic path consists of {} chained function calls.",
@@ -207,47 +209,52 @@ fn print_panic_stats(nodes: &[PanicChainNode], panic_chains: &[Vec<PanicChainEdg
     // );
     println!(
         "The average chain consists of {} function calls.",
-        if (panic_chains.iter().map(|x| x.len() as f64).sum::<f64>() / panic_chains.len() as f64)
+        if (panic_chains.iter().map(|x| *x as f64).sum::<f64>() / panic_chains.len() as f64)
             .is_nan()
         {
             0f64
         } else {
-            panic_chains.iter().map(|x| x.len() as f64).sum::<f64>() / panic_chains.len() as f64
+            panic_chains.iter().map(|x| *x as f64).sum::<f64>() / panic_chains.len() as f64
         }
     );
     println!();
 }
 
-fn get_chains_from_node(edges: &[PanicChainEdge], id: usize) -> Vec<Vec<PanicChainEdge>> {
+fn get_chains_from_node(edges: &[PanicChainEdge], id: usize) -> Vec<usize> {
     edges
         .iter()
         .filter(|edge| edge.to == id)
         .flat_map(|edge| {
             if edge.edge_panic_info.catches_panic {
-                vec![vec![edge.clone()]]
+                vec![1]
             } else {
-                expand_chains(edges, &[edge.clone()])
+                expand_chains(edges, &mut vec![edge.clone()])
             }
         })
         .collect()
 }
 
-fn expand_chains(edges: &[PanicChainEdge], chain: &[PanicChainEdge]) -> Vec<Vec<PanicChainEdge>> {
+fn expand_chains(edges: &[PanicChainEdge], chain: &mut Vec<PanicChainEdge>) -> Vec<usize> {
     let from = chain.last().expect("empty chain").from;
-    edges
+    let result: Vec<usize> = edges
         .iter()
         .filter(|edge| edge.to == from)
         .flat_map(|edge| {
-            let mut new_chain = chain.to_owned();
-            new_chain.push(edge.clone());
-            if chain.contains(edge) {
-                vec![]
+            if chain.contains(edge) || edge.edge_panic_info.catches_panic {
+                vec![chain.len()]
             } else {
-                expand_chains(edges, &new_chain)
+                chain.push(edge.clone());
+                let result = expand_chains(edges, chain);
+                chain.pop();
+                result
             }
         })
-        .chain([chain.to_owned()])
-        .collect()
+        .collect();
+    if result.is_empty() {
+        vec![chain.len()]
+    } else {
+        result
+    }
 }
 
 fn propagate_panic_kind(
