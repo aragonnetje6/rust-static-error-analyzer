@@ -138,7 +138,6 @@ pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
         }
     }
 
-    eprintln!("trimming...");
     // trim
     edges.retain(|edge| {
         edge.edge_panic_info.propagates_doc_panic
@@ -165,18 +164,18 @@ pub(crate) fn to_panic_chains(call_graph: &CallGraph) -> PanicChainGraph {
         edge.to = id_map[&edge.to];
     }
 
-    eprintln!("chaining...");
-    let panic_chains: Vec<usize> = nodes
+    eprintln!("Networking...");
+    let panic_networks: Vec<BTreeSet<PanicChainEdge>> = nodes
         .iter()
         .filter(|node| node.panics.explicit_invocation || node.panics.doc_section)
-        .flat_map(|node| get_chains_from_node(&edges, node.id()))
+        .map(|node| get_network_from_node(&edges, node.id()))
         .collect();
 
-    print_panic_stats(&nodes, &panic_chains);
+    print_panic_stats(&nodes, &panic_networks);
     PanicChainGraph::new(nodes, edges, call_graph.crate_name.clone())
 }
 
-fn print_panic_stats(nodes: &[PanicChainNode], panic_chains: &[usize]) {
+fn print_panic_stats(nodes: &[PanicChainNode], panic_networks: &[BTreeSet<PanicChainEdge>]) {
     let panic_invocations = nodes
         .iter()
         .filter(|node| node.panics.explicit_invocation)
@@ -197,27 +196,48 @@ fn print_panic_stats(nodes: &[PanicChainNode], panic_chains: &[usize]) {
     println!("There are {documented_panics} documented panics, of which {uninvoked_documented} do not directly invoke the panic macro");
     println!(
         "There are {} panic propagation chains in this program.",
-        panic_chains.len()
+        panic_networks.len()
     );
     println!(
-        "The longest chain consists of {} function calls.",
-        panic_chains.iter().max().copied().unwrap_or_default()
+        "The largest network consists of {} function calls.",
+        panic_networks
+            .iter()
+            .map(BTreeSet::len)
+            .max()
+            .unwrap_or_default()
     );
     // println!(
     //     "The longest panic path consists of {} chained function calls.",
     //     panic_chains.iter().map(Vec::len).max().unwrap_or_default()
     // );
     println!(
-        "The average chain consists of {} function calls.",
-        if (panic_chains.iter().map(|x| *x as f64).sum::<f64>() / panic_chains.len() as f64)
+        "The average network consists of {} function calls.",
+        if (panic_networks.iter().map(|x| x.len() as f64).sum::<f64>()
+            / panic_networks.len() as f64)
             .is_nan()
         {
             0f64
         } else {
-            panic_chains.iter().map(|x| *x as f64).sum::<f64>() / panic_chains.len() as f64
+            panic_networks.iter().map(|x| x.len() as f64).sum::<f64>() / panic_networks.len() as f64
         }
     );
     println!();
+}
+
+fn get_network_from_node(edges: &[PanicChainEdge], id: usize) -> BTreeSet<PanicChainEdge> {
+    let mut network = BTreeSet::new();
+    let mut todo: Vec<PanicChainEdge> =
+        edges.iter().filter(|edge| edge.to == id).cloned().collect();
+    network.extend(todo.clone());
+    while let Some(edge) = todo.pop() {
+        for new_edge in edges.iter().filter(|new_edge| new_edge.to == edge.from) {
+            if !network.contains(new_edge) {
+                network.insert(new_edge.clone());
+                todo.push(new_edge.clone());
+            }
+        }
+    }
+    network
 }
 
 fn get_chains_from_node(edges: &[PanicChainEdge], id: usize) -> Vec<usize> {
