@@ -13,5 +13,6 @@ rustc-ice-*.txt
 # Output graphs
 *.dot
 *.svg
+*.png
 results
 venv
