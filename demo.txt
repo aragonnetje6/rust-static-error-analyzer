@@ -1,0 +1,16 @@
+Using cargo 1.86.0-nightly (088d49608 2025-01-10)!
+
+# Result-errors:
+There are 1 error propagation chains in this program.
+The biggest chain consists of 1 function calls.
+The longest error path consists of 1 chained function calls.
+The average chain consists of 1 function calls.
+
+
+# Panics:
+There are 2 invocations of the panic macro, of which 1 are undocumented.
+There are 2 documented panics, of which 1 do not directly invoke the panic macro
+There are 3 panic propagation chains in this program.
+The largest network consists of 3 function calls.
+The average network consists of 1.6666666666666667 function calls.
+
