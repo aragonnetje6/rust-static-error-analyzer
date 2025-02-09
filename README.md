@@ -23,3 +23,5 @@ output, possible values are:
 Regardless of passed parameters, statistics for the given project will be
 printed to stdout, however, the Result-error analysis statistics are currently
 broken.
+
+A help command is also available, by passing `--help` or `-h` after the `--`.
