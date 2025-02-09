@@ -40,7 +40,7 @@ fn cargo_clean(workspace: &Workspace, gctx: &GlobalContext) -> CargoResult<()> {
 pub fn cargo_ast(manifest_path: &Path, target: &Target) -> String {
     eprintln!("Getting AST...");
     let mut command = Command::new("cargo");
-    command.arg("+nightly").arg("rustc");
+    command.arg("+nightly-2025-01-12").arg("rustc");
     let output = if target.is_lib() {
         command.arg("--lib")
     } else {
@@ -106,6 +106,7 @@ fn get_build_arguments(package: &Package) -> CompilerCommands {
 fn cargo_build_verbose(package: &Package) -> String {
     eprintln!("Building package...");
     let output = Command::new("cargo")
+        .arg("+nightly-2025-01-12")
         .arg("build")
         .arg("-v")
         .arg("--manifest-path")

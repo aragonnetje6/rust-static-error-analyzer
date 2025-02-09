@@ -195,7 +195,7 @@ fn print_panic_stats(nodes: &[PanicChainNode], panic_networks: &[BTreeSet<PanicC
     println!("There are {panic_invocations} invocations of the panic macro, of which {undocumented_invocations} are undocumented.");
     println!("There are {documented_panics} documented panics, of which {uninvoked_documented} do not directly invoke the panic macro");
     println!(
-        "There are {} panic propagation chains in this program.",
+        "There are {} panic propagation networks in this program.",
         panic_networks.len()
     );
     println!(

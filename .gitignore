@@ -14,3 +14,4 @@ rustc-ice-*.txt
 *.dot
 *.svg
 results
+venv
