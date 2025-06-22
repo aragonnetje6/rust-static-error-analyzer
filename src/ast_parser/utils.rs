@@ -117,6 +117,32 @@ where
     preceded(pair(spaced_tag(name), tag(":")), cut(field(value)))
 }
 
+#[macro_export]
+macro_rules! parse_struct {
+    (($name:literal, [$transform:expr])) => {
+        unit_struct_parser($name, $transform)
+    };
+    (($name:literal, {$(($field_name:literal, $value:expr),)+}, $transform:expr$(,)?)) => {
+        struct_parser($name, tuple(($(struct_field($field_name, $value),)+)), $transform)
+    };
+    (($name:literal, ($($value:expr,)+), $transform:expr$(,)?)) => {
+        tuple_struct_parser($name, tuple(($(field($value),)+)), $transform)
+    };
+    ($name:literal) => {
+        spaced_tag($name)
+    };
+}
+
+#[macro_export]
+macro_rules! parse_enum {
+    ($variant:tt,) => {{
+        parse_struct!($variant)
+    }};
+    ($first_variant:tt, $($variant:tt,)+) => {{
+        alt((parse_struct!($first_variant), parse_enum!($($variant,)+)))
+    }};
+}
+
 pub(crate) fn struct_parser<'a, O, O2, E, P>(
     name: &'a str,
     fields: P,
@@ -166,8 +192,12 @@ pub(crate) fn unit_struct_parser<'a, T: Clone, E: ParseError<&'a str>>(
 
 pub(crate) fn discard<T>(_: T) {}
 
-pub(crate) fn id<T>(x: T) -> T {
+pub(crate) fn first<T>((x,): (T,)) -> T {
     x
+}
+
+pub(crate) fn none<T, O>(_: T) -> Option<O> {
+    None
 }
 
 pub(crate) fn spaced_string(input: &str) -> IResult<&str, &str> {
