@@ -8,9 +8,9 @@ pub fn to_error_chains(call_graph: &CallGraph) -> ErrorChainGraph {
     let mut new_graph = ErrorChainGraph::new(call_graph.crate_name.clone());
 
     let mut count: usize = 0;
-    let mut max_size: usize = 0;
     let mut total_size: usize = 0;
     let mut max_depth: usize = 0;
+    let mut max_size: usize = 0;
     // Loop over all edges (e.g. function calls)
     for edge in &call_graph.edges {
         // Start of a chain
